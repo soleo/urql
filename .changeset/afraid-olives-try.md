@@ -1,5 +1,5 @@
 ---
-'@urql/exchange-persisted': patch
+'@soleo/exchange-persisted': patch
 ---
 
 Add automatic persisted query support for vendor Contentful CMS
