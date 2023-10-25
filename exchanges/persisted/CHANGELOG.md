@@ -1,5 +1,12 @@
 # @urql/exchange-persisted-fetch
 
+## 4.1.1
+
+### Patch Changes
+
+- Add automatic persisted query support for vendor Contentful CMS
+  Submitted by undefined (See [`fa66f80f`](https://github.com/urql-graphql/urql/commit/fa66f80fc56bde2f65edf753e08b256a79c9e85b))
+
 ## 4.1.0
 
 ### Minor Changes
