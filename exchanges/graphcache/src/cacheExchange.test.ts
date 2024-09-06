@@ -6,8 +6,8 @@ import {
   OperationResult,
   CombinedError,
 } from '@urql/core';
-import { print, stripIgnoredCharacters } from 'graphql';
 
+import { print, stripIgnoredCharacters } from 'graphql';
 import { vi, expect, it, describe } from 'vitest';
 
 import {
@@ -108,6 +108,82 @@ describe('data dependencies', () => {
     );
     expect(expected).toMatchObject(result.mock.calls[1][0].data);
     expect(result.mock.calls[1][0].data).toBe(result.mock.calls[0][0].data);
+  });
+
+  it('logs cache misses', () => {
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+    const op = client.createRequestOperation('query', {
+      key: 1,
+      query: queryOne,
+      variables: undefined,
+    });
+
+    const expected = {
+      __typename: 'Query',
+      author: {
+        id: '123',
+        name: 'Author',
+        __typename: 'Author',
+      },
+      unrelated: {
+        id: 'unrelated',
+        __typename: 'Unrelated',
+      },
+    };
+
+    const response = vi.fn((forwardOp: Operation): OperationResult => {
+      expect(forwardOp.key).toBe(op.key);
+      return { ...queryResponse, operation: forwardOp, data: expected };
+    });
+
+    const { source: ops$, next } = makeSubject<Operation>();
+    const result = vi.fn();
+    const forward: ExchangeIO = ops$ => pipe(ops$, map(response), share);
+
+    const messages: string[] = [];
+    pipe(
+      cacheExchange({
+        logger(severity, message) {
+          if (severity === 'debug') {
+            messages.push(message);
+          }
+        },
+      })({ forward, client, dispatchDebug })(ops$),
+      tap(result),
+      publish
+    );
+
+    next(op);
+    next(op);
+    next({
+      ...op,
+      query: gql`
+        query ($id: ID!) {
+          author(id: $id) {
+            id
+            name
+          }
+        }
+      `,
+      variables: { id: '123' },
+    });
+    expect(response).toHaveBeenCalledTimes(1);
+    expect(result).toHaveBeenCalledTimes(2);
+
+    expect(expected).toMatchObject(result.mock.calls[0][0].data);
+    expect(result.mock.calls[1][0]).toHaveProperty(
+      'operation.context.meta.cacheOutcome',
+      'hit'
+    );
+    expect(expected).toMatchObject(result.mock.calls[1][0].data);
+    expect(result.mock.calls[1][0].data).toBe(result.mock.calls[0][0].data);
+    expect(messages).toEqual([
+      'No value for field "author" on entity "Query"',
+      'No value for field "author" with args {"id":"123"} on entity "Query"',
+    ]);
   });
 
   it('respects cache-only operations', () => {
@@ -402,6 +478,167 @@ describe('data dependencies', () => {
       'data.author.balance.amount',
       1000
     );
+  });
+
+  it('does not notify related queries when a mutation update does not change the data', () => {
+    vi.useFakeTimers();
+
+    const balanceFragment = gql`
+      fragment BalanceFragment on Author {
+        id
+        balance {
+          amount
+        }
+      }
+    `;
+
+    const queryById = gql`
+      query ($id: ID!) {
+        author(id: $id) {
+          id
+          name
+          ...BalanceFragment
+        }
+      }
+
+      ${balanceFragment}
+    `;
+
+    const queryByIdDataA = {
+      __typename: 'Query',
+      author: {
+        __typename: 'Author',
+        id: '1',
+        name: 'Author 1',
+        balance: {
+          __typename: 'Balance',
+          amount: 100,
+        },
+      },
+    };
+
+    const queryByIdDataB = {
+      __typename: 'Query',
+      author: {
+        __typename: 'Author',
+        id: '2',
+        name: 'Author 2',
+        balance: {
+          __typename: 'Balance',
+          amount: 200,
+        },
+      },
+    };
+
+    const mutation = gql`
+      mutation ($userId: ID!, $amount: Int!) {
+        updateBalance(userId: $userId, amount: $amount) {
+          userId
+          balance {
+            amount
+          }
+        }
+      }
+    `;
+
+    const mutationData = {
+      __typename: 'Mutation',
+      updateBalance: {
+        __typename: 'UpdateBalanceResult',
+        userId: '1',
+        balance: {
+          __typename: 'Balance',
+          amount: 100,
+        },
+      },
+    };
+
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+    const { source: ops$, next } = makeSubject<Operation>();
+
+    const reexec = vi
+      .spyOn(client, 'reexecuteOperation')
+      .mockImplementation(next);
+
+    const opOne = client.createRequestOperation('query', {
+      key: 1,
+      query: queryById,
+      variables: { id: 1 },
+    });
+
+    const opTwo = client.createRequestOperation('query', {
+      key: 2,
+      query: queryById,
+      variables: { id: 2 },
+    });
+
+    const opMutation = client.createRequestOperation('mutation', {
+      key: 3,
+      query: mutation,
+      variables: { userId: '1', amount: 1000 },
+    });
+
+    const response = vi.fn((forwardOp: Operation): OperationResult => {
+      if (forwardOp.key === 1) {
+        return { ...queryResponse, operation: opOne, data: queryByIdDataA };
+      } else if (forwardOp.key === 2) {
+        return { ...queryResponse, operation: opTwo, data: queryByIdDataB };
+      } else if (forwardOp.key === 3) {
+        return {
+          ...queryResponse,
+          operation: opMutation,
+          data: mutationData,
+        };
+      }
+
+      return undefined as any;
+    });
+
+    const result = vi.fn();
+    const forward: ExchangeIO = ops$ =>
+      pipe(ops$, delay(1), map(response), share);
+
+    const updates = {
+      Mutation: {
+        updateBalance: vi.fn((result, _args, cache) => {
+          const {
+            updateBalance: { userId, balance },
+          } = result;
+          cache.writeFragment(balanceFragment, { id: userId, balance });
+        }),
+      },
+    };
+
+    const keys = {
+      Balance: () => null,
+    };
+
+    pipe(
+      cacheExchange({ updates, keys })({ forward, client, dispatchDebug })(
+        ops$
+      ),
+      tap(result),
+      publish
+    );
+
+    next(opTwo);
+    vi.runAllTimers();
+    expect(response).toHaveBeenCalledTimes(1);
+
+    next(opOne);
+    vi.runAllTimers();
+    expect(response).toHaveBeenCalledTimes(2);
+
+    next(opMutation);
+    vi.runAllTimers();
+
+    expect(response).toHaveBeenCalledTimes(3);
+    expect(updates.Mutation.updateBalance).toHaveBeenCalledTimes(1);
+
+    expect(reexec).toHaveBeenCalledTimes(0);
   });
 
   it('does nothing when no related queries have changed', () => {
@@ -751,6 +988,354 @@ describe('directives', () => {
     });
   });
 
+  it('Does not return partial data for nested selections', () => {
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+    const { source: ops$, next } = makeSubject<Operation>();
+
+    const query = gql`
+      {
+        todo {
+          ... on Todo @_optional {
+            id
+            text
+            author {
+              id
+              name
+            }
+          }
+        }
+      }
+    `;
+
+    const operation = client.createRequestOperation('query', {
+      key: 1,
+      query,
+      variables: undefined,
+    });
+
+    const queryResult: OperationResult = {
+      ...queryResponse,
+      operation,
+      data: {
+        __typename: 'Query',
+        todo: {
+          id: '1',
+          text: 'learn urql',
+          __typename: 'Todo',
+          author: {
+            __typename: 'Author',
+          },
+        },
+      },
+    };
+
+    const reexecuteOperation = vi
+      .spyOn(client, 'reexecuteOperation')
+      .mockImplementation(next);
+
+    const response = vi.fn((forwardOp: Operation): OperationResult => {
+      if (forwardOp.key === 1) return queryResult;
+      return undefined as any;
+    });
+
+    const result = vi.fn();
+    const forward: ExchangeIO = ops$ => pipe(ops$, map(response), share);
+
+    pipe(
+      cacheExchange({})({ forward, client, dispatchDebug })(ops$),
+      tap(result),
+      publish
+    );
+
+    next(operation);
+
+    expect(response).toHaveBeenCalledTimes(1);
+    expect(result).toHaveBeenCalledTimes(1);
+    expect(reexecuteOperation).toHaveBeenCalledTimes(0);
+    expect(result.mock.calls[0][0].data).toEqual(null);
+  });
+
+  it('returns partial results when an inline-fragment is marked as optional', () => {
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+    const { source: ops$, next } = makeSubject<Operation>();
+
+    const query = gql`
+      {
+        todos {
+          id
+          text
+          ... @_optional {
+            ... on Todo {
+              completed
+            }
+          }
+        }
+      }
+    `;
+
+    const operation = client.createRequestOperation('query', {
+      key: 1,
+      query,
+      variables: undefined,
+    });
+
+    const queryResult: OperationResult = {
+      ...queryResponse,
+      operation,
+      data: {
+        __typename: 'Query',
+        todos: [
+          {
+            id: '1',
+            text: 'learn urql',
+            __typename: 'Todo',
+          },
+        ],
+      },
+    };
+
+    const reexecuteOperation = vi
+      .spyOn(client, 'reexecuteOperation')
+      .mockImplementation(next);
+
+    const response = vi.fn((forwardOp: Operation): OperationResult => {
+      if (forwardOp.key === 1) return queryResult;
+      return undefined as any;
+    });
+
+    const result = vi.fn();
+    const forward: ExchangeIO = ops$ => pipe(ops$, map(response), share);
+
+    pipe(
+      cacheExchange({})({ forward, client, dispatchDebug })(ops$),
+      tap(result),
+      publish
+    );
+
+    next(operation);
+
+    expect(response).toHaveBeenCalledTimes(1);
+    expect(result).toHaveBeenCalledTimes(1);
+    expect(reexecuteOperation).toHaveBeenCalledTimes(0);
+    expect(result.mock.calls[0][0].data).toEqual({
+      todos: [
+        {
+          completed: null,
+          id: '1',
+          text: 'learn urql',
+        },
+      ],
+    });
+  });
+
+  it('does not return partial results when an inline-fragment is marked as optional with a required child fragment', () => {
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+    const { source: ops$, next } = makeSubject<Operation>();
+
+    const query = gql`
+      {
+        todos {
+          id
+          ... on Todo @_optional {
+            text
+            ... on Todo @_required {
+              completed
+            }
+          }
+        }
+      }
+    `;
+
+    const operation = client.createRequestOperation('query', {
+      key: 1,
+      query,
+      variables: undefined,
+    });
+
+    const queryResult: OperationResult = {
+      ...queryResponse,
+      operation,
+      data: {
+        __typename: 'Query',
+        todos: [
+          {
+            id: '1',
+            text: 'learn urql',
+            __typename: 'Todo',
+          },
+        ],
+      },
+    };
+
+    const reexecuteOperation = vi
+      .spyOn(client, 'reexecuteOperation')
+      .mockImplementation(next);
+
+    const response = vi.fn((forwardOp: Operation): OperationResult => {
+      if (forwardOp.key === 1) return queryResult;
+      return undefined as any;
+    });
+
+    const result = vi.fn();
+    const forward: ExchangeIO = ops$ => pipe(ops$, map(response), share);
+
+    pipe(
+      cacheExchange({})({ forward, client, dispatchDebug })(ops$),
+      tap(result),
+      publish
+    );
+
+    next(operation);
+
+    expect(response).toHaveBeenCalledTimes(1);
+    expect(result).toHaveBeenCalledTimes(1);
+    expect(reexecuteOperation).toHaveBeenCalledTimes(0);
+    expect(result.mock.calls[0][0].data).toEqual(null);
+  });
+
+  it('does not return partial results when an inline-fragment is marked as optional with a required field', () => {
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+    const { source: ops$, next } = makeSubject<Operation>();
+
+    const query = gql`
+      {
+        todos {
+          id
+          ... on Todo @_optional {
+            text
+            completed @_required
+          }
+        }
+      }
+    `;
+
+    const operation = client.createRequestOperation('query', {
+      key: 1,
+      query,
+      variables: undefined,
+    });
+
+    const queryResult: OperationResult = {
+      ...queryResponse,
+      operation,
+      data: {
+        __typename: 'Query',
+        todos: [
+          {
+            id: '1',
+            text: 'learn urql',
+            __typename: 'Todo',
+          },
+        ],
+      },
+    };
+
+    const reexecuteOperation = vi
+      .spyOn(client, 'reexecuteOperation')
+      .mockImplementation(next);
+
+    const response = vi.fn((forwardOp: Operation): OperationResult => {
+      if (forwardOp.key === 1) return queryResult;
+      return undefined as any;
+    });
+
+    const result = vi.fn();
+    const forward: ExchangeIO = ops$ => pipe(ops$, map(response), share);
+
+    pipe(
+      cacheExchange({})({ forward, client, dispatchDebug })(ops$),
+      tap(result),
+      publish
+    );
+
+    next(operation);
+
+    expect(response).toHaveBeenCalledTimes(1);
+    expect(result).toHaveBeenCalledTimes(1);
+    expect(reexecuteOperation).toHaveBeenCalledTimes(0);
+    expect(result.mock.calls[0][0].data).toEqual(null);
+  });
+
+  it('returns partial results when a fragment-definition is marked as optional', () => {
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+    const { source: ops$, next } = makeSubject<Operation>();
+
+    const query = gql`
+      {
+        todos {
+          id
+          text
+          ...Fields
+        }
+      }
+
+      fragment Fields on Todo @_optional {
+        completed
+      }
+    `;
+
+    const operation = client.createRequestOperation('query', {
+      key: 1,
+      query,
+      variables: undefined,
+    });
+
+    const queryResult: OperationResult = {
+      ...queryResponse,
+      operation,
+      data: {
+        __typename: 'Query',
+        todos: [
+          {
+            id: '1',
+            text: 'learn urql',
+            __typename: 'Todo',
+          },
+        ],
+      },
+    };
+
+    const reexecuteOperation = vi
+      .spyOn(client, 'reexecuteOperation')
+      .mockImplementation(next);
+
+    const response = vi.fn((forwardOp: Operation): OperationResult => {
+      if (forwardOp.key === 1) return queryResult;
+      return undefined as any;
+    });
+
+    const result = vi.fn();
+    const forward: ExchangeIO = ops$ => pipe(ops$, map(response), share);
+
+    pipe(
+      cacheExchange({})({ forward, client, dispatchDebug })(ops$),
+      tap(result),
+      publish
+    );
+
+    next(operation);
+
+    expect(response).toHaveBeenCalledTimes(1);
+    expect(result).toHaveBeenCalledTimes(1);
+    expect(reexecuteOperation).toHaveBeenCalledTimes(0);
+    expect(result.mock.calls[0][0].data).toEqual(null);
+  });
+
   it('does not return missing required fields', () => {
     const client = createClient({
       url: 'http://0.0.0.0',
@@ -1024,15 +1609,17 @@ describe('optimistic updates', () => {
 
     expect(response).toHaveBeenCalledTimes(1);
     expect(optimistic.concealAuthor).toHaveBeenCalledTimes(2);
-    expect(reexec).toHaveBeenCalledTimes(2);
+    expect(reexec).toHaveBeenCalledTimes(1);
     expect(result).toHaveBeenCalledTimes(0);
 
     vi.advanceTimersByTime(2);
     expect(response).toHaveBeenCalledTimes(2);
-    expect(result).toHaveBeenCalledTimes(0);
+    expect(reexec).toHaveBeenCalledTimes(2);
+    expect(result).toHaveBeenCalledTimes(1);
 
     vi.runAllTimers();
     expect(response).toHaveBeenCalledTimes(3);
+    expect(reexec).toHaveBeenCalledTimes(2);
     expect(result).toHaveBeenCalledTimes(2);
   });
 
@@ -1396,6 +1983,119 @@ describe('optimistic updates', () => {
     next(opOne);
     vi.runAllTimers();
     expect(result).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('mutation updates', () => {
+  it('invalidates the type when the entity is not present in the cache', () => {
+    vi.useFakeTimers();
+
+    const authorsQuery = gql`
+      query {
+        authors {
+          id
+          name
+        }
+      }
+    `;
+
+    const authorsQueryData = {
+      __typename: 'Query',
+      authors: [
+        {
+          __typename: 'Author',
+          id: '1',
+          name: 'Author',
+        },
+      ],
+    };
+
+    const mutation = gql`
+      mutation {
+        addAuthor {
+          id
+          name
+        }
+      }
+    `;
+
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+    const { source: ops$, next } = makeSubject<Operation>();
+
+    const reexec = vi
+      .spyOn(client, 'reexecuteOperation')
+      .mockImplementation(next);
+
+    const opOne = client.createRequestOperation('query', {
+      key: 1,
+      query: authorsQuery,
+      variables: undefined,
+    });
+
+    const opMutation = client.createRequestOperation('mutation', {
+      key: 2,
+      query: mutation,
+      variables: undefined,
+    });
+
+    const response = vi.fn((forwardOp: Operation): OperationResult => {
+      if (forwardOp.key === 1) {
+        return { ...queryResponse, operation: opOne, data: authorsQueryData };
+      } else if (forwardOp.key === 2) {
+        return {
+          ...queryResponse,
+          operation: opMutation,
+          data: {
+            __typename: 'Mutation',
+            addAuthor: { id: '2', name: 'Author 2', __typename: 'Author' },
+          },
+        };
+      }
+
+      return undefined as any;
+    });
+
+    const result = vi.fn();
+    const forward: ExchangeIO = ops$ =>
+      pipe(ops$, delay(1), map(response), share);
+
+    pipe(
+      cacheExchange()({
+        forward,
+        client,
+        dispatchDebug,
+      })(ops$),
+      tap(result),
+      publish
+    );
+
+    next(opOne);
+    vi.runAllTimers();
+    expect(response).toHaveBeenCalledTimes(1);
+
+    next(opMutation);
+    expect(response).toHaveBeenCalledTimes(1);
+    expect(reexec).toHaveBeenCalledTimes(0);
+
+    vi.runAllTimers();
+
+    expect(response).toHaveBeenCalledTimes(2);
+    expect(result).toHaveBeenCalledTimes(2);
+    expect(reexec).toHaveBeenCalledTimes(1);
+
+    next(opOne);
+    vi.runAllTimers();
+    expect(response).toHaveBeenCalledTimes(3);
+    expect(result).toHaveBeenCalledTimes(3);
+    expect(result.mock.calls[1][0].data).toEqual({
+      addAuthor: {
+        id: '2',
+        name: 'Author 2',
+      },
+    });
   });
 });
 
@@ -2121,6 +2821,156 @@ describe('schema awareness', () => {
   });
 });
 
+describe('looping protection', () => {
+  it('applies stale to blocked looping queries', () => {
+    let normalData: OperationResult | undefined;
+    let extendedData: OperationResult | undefined;
+
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+
+    const { source: ops$, next: nextOp } = makeSubject<Operation>();
+    const { source: res$, next: nextRes } = makeSubject<OperationResult>();
+
+    vi.spyOn(client, 'reexecuteOperation').mockImplementation(nextOp);
+
+    const normalQuery = gql`
+      {
+        __typename
+        item {
+          __typename
+          id
+        }
+      }
+    `;
+
+    const extendedQuery = gql`
+      {
+        __typename
+        item {
+          __typename
+          extended: id
+          extra @_optional
+        }
+      }
+    `;
+
+    const forward = (ops$: Source<Operation>): Source<OperationResult> =>
+      share(
+        merge([
+          pipe(
+            ops$,
+            filter(() => false)
+          ) as any,
+          res$,
+        ])
+      );
+
+    pipe(
+      cacheExchange()({ forward, client, dispatchDebug })(ops$),
+      tap(result => {
+        if (result.operation.kind === 'query') {
+          if (result.operation.key === 1) {
+            normalData = result;
+          } else if (result.operation.key === 2) {
+            extendedData = result;
+          }
+        }
+      }),
+      publish
+    );
+
+    const normalOp = client.createRequestOperation(
+      'query',
+      {
+        key: 1,
+        query: normalQuery,
+        variables: undefined,
+      },
+      {
+        requestPolicy: 'cache-first',
+      }
+    );
+
+    const extendedOp = client.createRequestOperation(
+      'query',
+      {
+        key: 2,
+        query: extendedQuery,
+        variables: undefined,
+      },
+      {
+        requestPolicy: 'cache-first',
+      }
+    );
+
+    nextOp(normalOp);
+
+    nextRes({
+      operation: normalOp,
+      data: {
+        __typename: 'Query',
+        item: {
+          __typename: 'Node',
+          id: 'id',
+        },
+      },
+      stale: false,
+      hasNext: false,
+    });
+
+    expect(normalData).toMatchObject({ stale: false });
+    expect(client.reexecuteOperation).toHaveBeenCalledTimes(0);
+
+    nextOp(extendedOp);
+
+    expect(extendedData).toMatchObject({ stale: true });
+    expect(client.reexecuteOperation).toHaveBeenCalledTimes(1);
+
+    // Out of band re-execute first operation
+    nextOp(normalOp);
+    nextRes({
+      ...queryResponse,
+      operation: normalOp,
+      data: {
+        __typename: 'Query',
+        item: {
+          __typename: 'Node',
+          id: 'id',
+        },
+      },
+    });
+
+    expect(normalData).toMatchObject({ stale: false });
+    expect(extendedData).toMatchObject({ stale: true });
+    expect(client.reexecuteOperation).toHaveBeenCalledTimes(3);
+
+    nextOp(extendedOp);
+
+    expect(normalData).toMatchObject({ stale: false });
+    expect(extendedData).toMatchObject({ stale: true });
+    expect(client.reexecuteOperation).toHaveBeenCalledTimes(3);
+
+    nextRes({
+      ...queryResponse,
+      operation: extendedOp,
+      data: {
+        __typename: 'Query',
+        item: {
+          __typename: 'Node',
+          extended: 'id',
+          extra: 'extra',
+        },
+      },
+    });
+
+    expect(extendedData).toMatchObject({ stale: false });
+    expect(client.reexecuteOperation).toHaveBeenCalledTimes(4);
+  });
+});
+
 describe('commutativity', () => {
   it('applies results that come in out-of-order commutatively and consistently', () => {
     vi.useFakeTimers();
@@ -2797,8 +3647,7 @@ describe('commutativity', () => {
     });
     const { source: ops$, next: nextOp } = makeSubject<Operation>();
     const { source: res$, next: nextRes } = makeSubject<OperationResult>();
-
-    vi.spyOn(client, 'reexecuteOperation').mockImplementation(nextOp);
+    client.reexecuteOperation = nextOp;
 
     const normalQuery = gql`
       {
@@ -2835,11 +3684,11 @@ describe('commutativity', () => {
       }
     `;
 
-    const forward = (ops$: Source<Operation>): Source<OperationResult> =>
+    const forward = (operations$: Source<Operation>): Source<OperationResult> =>
       share(
         merge([
           pipe(
-            ops$,
+            operations$,
             filter(() => false)
           ) as any,
           res$,
@@ -2930,5 +3779,195 @@ describe('commutativity', () => {
     expect(combinedData).toHaveProperty('hasNext', false);
     expect(combinedData).toHaveProperty('data.deferred.id', 1);
     expect(combinedData).toHaveProperty('data.node.id', 2);
+  });
+
+  it('applies deferred logic only to deferred operations', () => {
+    let failingData: OperationResult | undefined;
+
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+
+    const { source: ops$, next: nextOp } = makeSubject<Operation>();
+    const { source: res$ } = makeSubject<OperationResult>();
+
+    const deferredQuery = gql`
+      {
+        ... @defer {
+          deferred {
+            id
+            name
+          }
+        }
+      }
+    `;
+
+    const failingQuery = gql`
+      {
+        deferred {
+          id
+          name
+        }
+      }
+    `;
+
+    const forward = (ops$: Source<Operation>): Source<OperationResult> =>
+      share(
+        merge([
+          pipe(
+            ops$,
+            filter(() => false)
+          ) as any,
+          res$,
+        ])
+      );
+
+    pipe(
+      cacheExchange()({ forward, client, dispatchDebug })(ops$),
+      tap(result => {
+        if (result.operation.kind === 'query') {
+          if (result.operation.key === 1) {
+            failingData = result;
+          }
+        }
+      }),
+      publish
+    );
+
+    const failingOp = client.createRequestOperation('query', {
+      key: 1,
+      query: failingQuery,
+      variables: undefined,
+    });
+    const deferredOp = client.createRequestOperation('query', {
+      key: 2,
+      query: deferredQuery,
+      variables: undefined,
+    });
+
+    nextOp(deferredOp);
+    nextOp(failingOp);
+
+    expect(failingData).not.toMatchObject({ hasNext: true });
+  });
+});
+
+describe('abstract types', () => {
+  it('works with two responses giving different concrete types for a union', () => {
+    const query = gql`
+      query ($id: ID!) {
+        field(id: $id) {
+          id
+          union {
+            ... on Type1 {
+              id
+              name
+              __typename
+            }
+            ... on Type2 {
+              id
+              title
+              __typename
+            }
+          }
+          __typename
+        }
+      }
+    `;
+    const client = createClient({
+      url: 'http://0.0.0.0',
+      exchanges: [],
+    });
+    const { source: ops$, next } = makeSubject<Operation>();
+    const operation1 = client.createRequestOperation('query', {
+      key: 1,
+      query,
+      variables: { id: '1' },
+    });
+    const operation2 = client.createRequestOperation('query', {
+      key: 2,
+      query,
+      variables: { id: '2' },
+    });
+    const queryResult1: OperationResult = {
+      ...queryResponse,
+      operation: operation1,
+      data: {
+        __typename: 'Query',
+        field: {
+          id: '1',
+          __typename: 'Todo',
+          union: {
+            id: '1',
+            name: 'test',
+            __typename: 'Type1',
+          },
+        },
+      },
+    };
+
+    const queryResult2: OperationResult = {
+      ...queryResponse,
+      operation: operation2,
+      data: {
+        __typename: 'Query',
+        field: {
+          id: '2',
+          __typename: 'Todo',
+          union: {
+            id: '2',
+            title: 'test',
+            __typename: 'Type2',
+          },
+        },
+      },
+    };
+
+    vi.spyOn(client, 'reexecuteOperation').mockImplementation(next);
+    const response = vi.fn((forwardOp: Operation): OperationResult => {
+      if (forwardOp.key === 1) return queryResult1;
+      if (forwardOp.key === 2) return queryResult2;
+      return undefined as any;
+    });
+
+    const result = vi.fn();
+    const forward: ExchangeIO = ops$ => pipe(ops$, map(response), share);
+
+    pipe(
+      cacheExchange({})({ forward, client, dispatchDebug })(ops$),
+      tap(result),
+      publish
+    );
+
+    next(operation1);
+    expect(response).toHaveBeenCalledTimes(1);
+    expect(result).toHaveBeenCalledTimes(1);
+    expect(result.mock.calls[0][0].data).toEqual({
+      field: {
+        __typename: 'Todo',
+        id: '1',
+        union: {
+          __typename: 'Type1',
+          id: '1',
+          name: 'test',
+        },
+      },
+    });
+
+    next(operation2);
+    expect(response).toHaveBeenCalledTimes(2);
+    expect(result).toHaveBeenCalledTimes(2);
+    expect(result.mock.calls[1][0].data).toEqual({
+      field: {
+        __typename: 'Todo',
+        id: '2',
+        union: {
+          __typename: 'Type2',
+          id: '2',
+          title: 'test',
+        },
+      },
+    });
   });
 });

@@ -333,16 +333,6 @@ export interface Cache {
     args?: FieldArgs
   ): DataField | undefined;
 
-  /** Returns a cached value on a given entity’s field by its field key.
-   *
-   * @deprecated
-   * Use {@link cache.resolve} instead.
-   */
-  resolveFieldByKey(
-    entity: Entity | undefined,
-    fieldKey: string
-  ): DataField | undefined;
-
   /** Returns a list of cached fields for a given GraphQL object (“entity”).
    *
    * @param entity - a GraphQL object (“entity”) or an entity key.
@@ -541,8 +531,21 @@ export type ResolverResult =
   | null
   | undefined;
 
+export type Logger = (
+  severity: 'debug' | 'error' | 'warn',
+  message: string
+) => void;
+
 /** Input parameters for the {@link cacheExchange}. */
 export type CacheExchangeOpts = {
+  /** Configure a custom-logger for graphcache, this function wll be called with a severity and a message.
+   *
+   * @remarks
+   * By default we will invoke `console.warn` for warnings during development, however you might want to opt
+   * out of this because you are re-using urql for a different library. This setting allows you to stub the logger
+   * function or filter to only logs you want.
+   */
+  logger?: Logger;
   /** Configures update functions which are called when the mapped fields are written to the cache.
    *
    * @remarks
@@ -980,6 +983,8 @@ export interface StorageAdapter {
    * will cause all failed mutations in the queue to be retried.
    */
   onOnline?(cb: () => void): any;
+  /** Called when the cache has been hydrated with the data from `readData` */
+  onCacheHydrated?(): any;
 }
 
 /** Set of keys that have been modified or accessed.

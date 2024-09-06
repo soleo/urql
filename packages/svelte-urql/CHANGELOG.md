@@ -1,5 +1,43 @@
 # @urql/svelte
 
+## 4.2.1
+
+### Patch Changes
+
+- add support for Svelte 5 in the `peerDependencies`
+  Submitted by [@itssumitrai](https://github.com/itssumitrai) (See [#3634](https://github.com/urql-graphql/urql/pull/3634))
+
+## 4.2.0
+
+### Minor Changes
+
+- Mark `@urql/core` as a peer dependency as well as a regular dependency
+  Submitted by [@kitten](https://github.com/kitten) (See [#3579](https://github.com/urql-graphql/urql/pull/3579))
+
+### Patch Changes
+
+- ⚠️ Fix subscription handlers to not receive `null` values
+  Submitted by [@kitten](https://github.com/kitten) (See [#3581](https://github.com/urql-graphql/urql/pull/3581))
+
+## 4.1.1
+
+### Patch Changes
+
+- Updated dependencies (See [#3520](https://github.com/urql-graphql/urql/pull/3520), [#3553](https://github.com/urql-graphql/urql/pull/3553), and [#3520](https://github.com/urql-graphql/urql/pull/3520))
+  - @urql/core@5.0.0
+
+## 4.1.0
+
+### Minor Changes
+
+- Add back the `reexecute` function
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3472](https://github.com/urql-graphql/urql/pull/3472))
+
+### Patch Changes
+
+- Updated dependencies (See [#3514](https://github.com/urql-graphql/urql/pull/3514), [#3505](https://github.com/urql-graphql/urql/pull/3505), [#3499](https://github.com/urql-graphql/urql/pull/3499), and [#3515](https://github.com/urql-graphql/urql/pull/3515))
+  - @urql/core@4.3.0
+
 ## 4.0.4
 
 ### Patch Changes

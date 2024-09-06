@@ -10,6 +10,7 @@ import type { AnyVariables, GraphQLRequest, Operation } from '../types';
 /** Abstract definition of the JSON data sent during GraphQL HTTP POST requests. */
 export interface FetchBody {
   query?: string;
+  documentId?: string;
   operationName: string | undefined;
   variables: undefined | Record<string, any>;
   extensions: undefined | Record<string, any>;
@@ -24,16 +25,31 @@ export function makeFetchBody<
   Data = any,
   Variables extends AnyVariables = AnyVariables,
 >(request: Omit<GraphQLRequest<Data, Variables>, 'key'>): FetchBody {
-  const isAPQ =
-    request.extensions &&
-    request.extensions.persistedQuery &&
-    !request.extensions.persistedQuery.miss;
-  return {
-    query: isAPQ ? undefined : stringifyDocument(request.query),
+  const body: FetchBody = {
+    query: undefined,
+    documentId: undefined,
     operationName: getOperationName(request.query),
     variables: request.variables || undefined,
     extensions: request.extensions,
   };
+
+  if (
+    'documentId' in request.query &&
+    request.query.documentId &&
+    // NOTE: We have to check that the document will definitely be sent
+    // as a persisted document to avoid breaking changes
+    (!request.query.definitions || !request.query.definitions.length)
+  ) {
+    body.documentId = request.query.documentId;
+  } else if (
+    !request.extensions ||
+    !request.extensions.persistedQuery ||
+    !!request.extensions.persistedQuery.miss
+  ) {
+    body.query = stringifyDocument(request.query);
+  }
+
+  return body;
 }
 
 /** Creates a URL that will be called for a GraphQL HTTP request.
@@ -55,24 +71,32 @@ export const makeFetchURL = (
     operation.kind === 'query' && operation.context.preferGetMethod;
   if (!useGETMethod || !body) return operation.context.url;
 
-  const url = new URL(operation.context.url);
+  const urlParts = splitOutSearchParams(operation.context.url);
   for (const key in body) {
     const value = body[key];
     if (value) {
-      url.searchParams.set(
+      urlParts[1].set(
         key,
         typeof value === 'object' ? stringifyVariables(value) : value
       );
     }
   }
-
-  const finalUrl = url.toString();
+  const finalUrl = urlParts.join('?');
   if (finalUrl.length > 2047 && useGETMethod !== 'force') {
     operation.context.preferGetMethod = false;
     return operation.context.url;
   }
 
   return finalUrl;
+};
+
+const splitOutSearchParams = (
+  url: string
+): readonly [string, URLSearchParams] => {
+  const start = url.indexOf('?');
+  return start > -1
+    ? [url.slice(0, start), new URLSearchParams(url.slice(start + 1))]
+    : [url, new URLSearchParams()];
 };
 
 /** Serializes a {@link FetchBody} into a {@link RequestInit.body} format. */
@@ -102,6 +126,9 @@ const serializeBody = (
   }
 };
 
+const isHeaders = (headers: HeadersInit): headers is Headers =>
+  'has' in headers && !Object.keys(headers).length;
+
 /** Creates a `RequestInit` object for a given `Operation`.
  *
  * @param operation - An {@link Operation} for which to make the request.
@@ -129,9 +156,32 @@ export const makeFetchOptions = (
     (typeof operation.context.fetchOptions === 'function'
       ? operation.context.fetchOptions()
       : operation.context.fetchOptions) || {};
-  if (extraOptions.headers)
-    for (const key in extraOptions.headers)
-      headers[key.toLowerCase()] = extraOptions.headers[key];
+  if (extraOptions.headers) {
+    if (isHeaders(extraOptions.headers)) {
+      extraOptions.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+    } else if (Array.isArray(extraOptions.headers)) {
+      (extraOptions.headers as Array<[string, string]>).forEach(
+        (value, key) => {
+          if (Array.isArray(value)) {
+            if (headers[value[0]]) {
+              headers[value[0]] = `${headers[value[0]]},${value[1]}`;
+            } else {
+              headers[value[0]] = value[1];
+            }
+          } else {
+            headers[key] = value;
+          }
+        }
+      );
+    } else {
+      for (const key in extraOptions.headers) {
+        headers[key.toLowerCase()] = extraOptions.headers[key];
+      }
+    }
+  }
+
   const serializedBody = serializeBody(operation, body);
   if (typeof serializedBody === 'string' && !headers['content-type'])
     headers['content-type'] = 'application/json';

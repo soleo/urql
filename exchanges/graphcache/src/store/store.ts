@@ -17,13 +17,14 @@ import type {
   Entity,
   CacheExchangeOpts,
   DirectivesConfig,
+  Logger,
 } from '../types';
 
 import { invariant } from '../helpers/help';
 import { contextRef, ensureLink } from '../operations/shared';
 import { _query, _queryFragment } from '../operations/query';
 import { _write, _writeFragment } from '../operations/write';
-import { invalidateEntity } from '../operations/invalidate';
+import { invalidateEntity, invalidateType } from '../operations/invalidate';
 import { keyOfField } from './keys';
 import * as InMemoryData from './data';
 
@@ -48,6 +49,7 @@ export class Store<
 {
   data: InMemoryData.InMemoryData;
 
+  logger?: Logger;
   directives: DirectivesConfig;
   resolvers: ResolverConfig;
   updates: UpdatesConfig;
@@ -62,6 +64,7 @@ export class Store<
   constructor(opts?: C) {
     if (!opts) opts = {} as C;
 
+    this.logger = opts.logger;
     this.resolvers = opts.resolvers || {};
     this.directives = opts.directives || {};
     this.optimisticMutations = opts.optimistic || {};
@@ -100,12 +103,13 @@ export class Store<
     this.data = InMemoryData.make(queryName);
 
     if (this.schema && process.env.NODE_ENV !== 'production') {
-      expectValidKeyingConfig(this.schema, this.keys);
-      expectValidUpdatesConfig(this.schema, this.updates);
-      expectValidResolversConfig(this.schema, this.resolvers);
+      expectValidKeyingConfig(this.schema, this.keys, this.logger);
+      expectValidUpdatesConfig(this.schema, this.updates, this.logger);
+      expectValidResolversConfig(this.schema, this.resolvers, this.logger);
       expectValidOptimisticMutationsConfig(
         this.schema,
-        this.optimisticMutations
+        this.optimisticMutations,
+        this.logger
       );
     }
   }
@@ -149,35 +153,41 @@ export class Store<
     field: string,
     args?: FieldArgs
   ): DataField | undefined {
-    let fieldValue: DataField | undefined = null;
     const entityKey = this.keyOfEntity(entity);
     if (entityKey) {
       const fieldKey = keyOfField(field, args);
-      fieldValue = InMemoryData.readRecord(entityKey, fieldKey);
-      if (fieldValue === undefined)
-        fieldValue = InMemoryData.readLink(entityKey, fieldKey);
+      const fieldValue = InMemoryData.readRecord(entityKey, fieldKey);
+      if (fieldValue !== undefined) return fieldValue;
+      let fieldLink = InMemoryData.readLink(entityKey, fieldKey);
+      if (fieldLink !== undefined) fieldLink = ensureLink(this, fieldLink);
+      return fieldLink;
     }
-    return fieldValue;
-  }
-
-  resolveFieldByKey(entity: Entity, field: string, args?: FieldArgs) {
-    return this.resolve(entity, field, args);
   }
 
   invalidate(entity: Entity, field?: string, args?: FieldArgs) {
     const entityKey = this.keyOfEntity(entity);
+    const shouldInvalidateType =
+      entity &&
+      typeof entity === 'string' &&
+      !field &&
+      !args &&
+      !this.resolve(entity, '__typename');
 
-    invariant(
-      entityKey,
-      "Can't generate a key for invalidate(...).\n" +
-        'You have to pass an id or _id field or create a custom `keys` field for `' +
-        (typeof entity === 'object'
-          ? (entity as Data).__typename
-          : entity + '`.'),
-      19
-    );
+    if (shouldInvalidateType) {
+      invalidateType(entity, []);
+    } else {
+      invariant(
+        entityKey,
+        "Can't generate a key for invalidate(...).\n" +
+          'You have to pass an id or _id field or create a custom `keys` field for `' +
+          (typeof entity === 'object'
+            ? (entity as Data).__typename
+            : entity + '`.'),
+        19
+      );
 
-    invalidateEntity(entityKey, field, args);
+      invalidateEntity(entityKey, field, args);
+    }
   }
 
   inspectFields(entity: Entity): FieldInfo[] {

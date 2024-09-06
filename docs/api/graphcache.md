@@ -32,6 +32,8 @@ options and returns an [`Exchange`](./core.md#exchange).
 | `optimistic` | A mapping of mutation fields to resolvers that may be used to provide _Graphcache_ with an optimistic result for a given mutation field that should be applied to the cached data temporarily.                                |
 | `schema`     | A serialized GraphQL schema that is used by _Graphcache_ to resolve partial data, interfaces, and enums. The schema also used to provide helpful warnings for [schema awareness](../graphcache/schema-awareness.md).          |
 | `storage`    | A persisted storage interface that may be provided to preserve cache data for [offline support](../graphcache/offline.md).                                                                                                    |
+| `globalIDs`  | A boolean or list of typenames that have globally unique ids, this changes how graphcache internally keys the entities. This can be useful for complex interface relationships.                                               |
+| `logger`     | A function that will be invoked for warning/debug/... logs                                                                                                                                                                    |
 
 The `@urql/exchange-graphcache` package also exports the `offlineExchange`; which is identical to
 the `cacheExchange` but activates [offline support](../graphcache/offline.md) when the `storage` option is passed.
@@ -178,13 +180,14 @@ the cache's data to persisted storage on the user's device. it
 > **NOTE:** Offline Support is currently experimental! It hasn't been extensively tested yet and
 > may not always behave as expected. Please try it out with caution!
 
-| Method          | Type                                          | Description                                                                                                                                                                            |
-| --------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `writeData`     | `(delta: SerializedEntries) => Promise<void>` | This provided method must be able to accept an object of key-value entries that will be persisted to the storage. This method is called as a batch of updated entries becomes ready.   |
-| `readData`      | `() => Promise<SerializedEntries>`            | This provided method must be able to return a single combined object of previous key-value entries that have been previously preserved using `writeData`. It's only called on startup. |
-| `writeMetadata` | `(json: SerializedRequest[]) => void`         | This provided method must be able to persist metadata for the cache. For backwards compatibility it should be able to accept any JSON data.                                            |
-| `readMetadata`  | `() => Promise<null \| SerializedRequest[]>`  | This provided method must be able to read the persisted metadata that has previously been written using `writeMetadata`. It's only called on startup.                                  |
-| `onOnline`      | `(cb: () => void) => void`                    | This method must be able to accept a callback that is called when the user's device comes back online.                                                                                 |
+| Method            | Type                                          | Description                                                                                                                                                                            |
+| ----------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `writeData`       | `(delta: SerializedEntries) => Promise<void>` | This provided method must be able to accept an object of key-value entries that will be persisted to the storage. This method is called as a batch of updated entries becomes ready.   |
+| `readData`        | `() => Promise<SerializedEntries>`            | This provided method must be able to return a single combined object of previous key-value entries that have been previously preserved using `writeData`. It's only called on startup. |
+| `writeMetadata`   | `(json: SerializedRequest[]) => void`         | This provided method must be able to persist metadata for the cache. For backwards compatibility it should be able to accept any JSON data.                                            |
+| `readMetadata`    | `() => Promise<null \| SerializedRequest[]>`  | This provided method must be able to read the persisted metadata that has previously been written using `writeMetadata`. It's only called on startup.                                  |
+| `onOnline`        | `(cb: () => void) => void`                    | This method must be able to accept a callback that is called when the user's device comes back online.                                                                                 |
+| `onCacheHydrated` | `() => void`                                  | This method will be called when the `cacheExchange` has finished hydrating the data coming from storage.                                                                               |
 
 These options are split into three parts:
 
@@ -270,9 +273,7 @@ cache.resolve({ __typename: 'Query' }, cache.keyOfField('todo', { id: 1 })); // 
 ```
 
 This specialized case is likely only going to be useful in combination with
-[`cache.inspectFields`](#inspectfields). Previously a specialised method existed for this
-case specifically and was called `cache.resolveFieldByKey`, which is now deprecated, since
-`cache.resolve` may be called with a field key and no extra arguments.
+[`cache.inspectFields`](#inspectfields).
 
 ### inspectFields
 

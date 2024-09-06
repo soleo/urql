@@ -46,6 +46,7 @@ import {
   getFieldError,
   deferRef,
 } from './shared';
+import { invalidateType } from './invalidate';
 
 export interface WriteResult {
   data: null | Data;
@@ -147,7 +148,8 @@ export const _writeFragment = (
           ' but could only find ' +
           Object.keys(fragments).join(', ') +
           '.',
-        11
+        11,
+        store.logger
       );
 
       return null;
@@ -159,7 +161,8 @@ export const _writeFragment = (
       warn(
         'writeFragment(...) was called with an empty fragment.\n' +
           'You have to call it with at least one fragment in your GraphQL document.',
-        11
+        11,
+        store.logger
       );
 
       return null;
@@ -175,7 +178,8 @@ export const _writeFragment = (
         'You have to pass an `id` or `_id` field or create a custom `keys` config for `' +
         typename +
         '`.',
-      12
+      12,
+      store.logger
     );
   }
 
@@ -223,18 +227,21 @@ const writeSelection = (
     warn(
       "Couldn't find __typename when writing.\n" +
         "If you're writing to the cache manually have to pass a `__typename` property on each entity in your data.",
-      14
+      14,
+      ctx.store.logger
     );
     return;
   } else if (!isRoot && entityKey) {
     InMemoryData.writeRecord(entityKey, '__typename', typename);
+    InMemoryData.writeType(typename, entityKey);
   }
 
   const updates = ctx.store.updates[typename];
   const iterate = makeSelectionIterator(
     typename,
     entityKey || typename,
-    deferRef,
+    false,
+    undefined,
     select,
     ctx
   );
@@ -260,7 +267,12 @@ const writeSelection = (
 
     if (process.env.NODE_ENV !== 'production') {
       if (ctx.store.schema && typename && fieldName !== '__typename') {
-        isFieldAvailableOnType(ctx.store.schema, typename, fieldName);
+        isFieldAvailableOnType(
+          ctx.store.schema,
+          typename,
+          fieldName,
+          ctx.store.logger
+        );
       }
     }
 
@@ -309,7 +321,8 @@ const writeSelection = (
               '` is `undefined`, but the GraphQL query expects a ' +
               expected +
               ' for this field.',
-            13
+            13,
+            ctx.store.logger
           );
         }
       }
@@ -330,6 +343,7 @@ const writeSelection = (
             ? InMemoryData.readLink(entityKey || typename, fieldKey)
             : undefined
         );
+
         InMemoryData.writeLink(entityKey || typename, fieldKey, link);
       } else {
         writeField(ctx, getSelectionSet(node), ensureData(fieldValue));
@@ -361,6 +375,38 @@ const writeSelection = (
 
       data[fieldName] = fieldValue;
       updater(data, fieldArgs || {}, ctx.store, ctx);
+    } else if (
+      typename === ctx.store.rootFields['mutation'] &&
+      !ctx.optimistic
+    ) {
+      // If we're on a mutation that doesn't have an updater, we'll see
+      // whether we can find the entity returned by the mutation in the cache.
+      // if we don't we'll assume this is a create mutation and invalidate
+      // the found __typename.
+      if (fieldValue && Array.isArray(fieldValue)) {
+        const excludedEntities: string[] = fieldValue.map(
+          entity => ctx.store.keyOfEntity(entity) || ''
+        );
+        for (let i = 0, l = fieldValue.length; i < l; i++) {
+          const key = excludedEntities[i];
+          if (key && fieldValue[i].__typename) {
+            const resolved = InMemoryData.readRecord(key, '__typename');
+            const count = InMemoryData!.getRefCount(key);
+            if (resolved && !count) {
+              invalidateType(fieldValue[i].__typename, excludedEntities);
+            }
+          }
+        }
+      } else if (fieldValue && typeof fieldValue === 'object') {
+        const key = ctx.store.keyOfEntity(fieldValue as any);
+        if (key) {
+          const resolved = InMemoryData.readRecord(key, '__typename');
+          const count = InMemoryData.getRefCount(key);
+          if ((!resolved || !count) && fieldValue.__typename) {
+            invalidateType(fieldValue.__typename, [key]);
+          }
+        }
+      }
     }
 
     // After processing the field, remove the current alias from the path again
@@ -426,7 +472,8 @@ const writeField = (
         'If this is intentional, create a `keys` config for `' +
         typename +
         '` that always returns null.',
-      15
+      15,
+      ctx.store.logger
     );
   }
 

@@ -1,23 +1,22 @@
 /* eslint-disable react-hooks/rules-of-hooks */
 
 import type { Ref } from 'vue';
-import { ref } from 'vue';
-import type { DocumentNode } from 'graphql';
+import { shallowRef } from 'vue';
 import { pipe, onPush, filter, toPromise, take } from 'wonka';
 
 import type {
   Client,
   AnyVariables,
-  TypedDocumentNode,
   CombinedError,
   Operation,
   OperationContext,
   OperationResult,
+  DocumentInput,
 } from '@urql/core';
-import { createRequest } from '@urql/core';
 
 import { useClient } from './useClient';
-import { unwrapPossibleProxy } from './utils';
+import type { MaybeRef } from './utils';
+import { createRequestWithArgs, useRequestState } from './utils';
 
 /** State of the last mutation executed by {@link useMutation}.
  *
@@ -62,7 +61,7 @@ export interface UseMutationResponse<T, V extends AnyVariables = AnyVariables> {
    *
    * @param variables - variables using which the mutation will be executed.
    * @param context - optionally, context options that will be merged with
-   * {@link UseMutationArgs.context} and the `Client`’s options.
+   * the `Client`’s options.
    * @returns the {@link OperationResult} of the mutation.
    *
    * @remarks
@@ -125,21 +124,21 @@ export interface UseMutationResponse<T, V extends AnyVariables = AnyVariables> {
  * ```
  */
 export function useMutation<T = any, V extends AnyVariables = AnyVariables>(
-  query: TypedDocumentNode<T, V> | DocumentNode | string
+  query: DocumentInput<T, V>
 ): UseMutationResponse<T, V> {
   return callUseMutation(query);
 }
 
 export function callUseMutation<T = any, V extends AnyVariables = AnyVariables>(
-  query: TypedDocumentNode<T, V> | DocumentNode | string,
+  query: MaybeRef<DocumentInput<T, V>>,
   client: Ref<Client> = useClient()
 ): UseMutationResponse<T, V> {
-  const data: Ref<T | undefined> = ref();
-  const stale: Ref<boolean> = ref(false);
-  const fetching: Ref<boolean> = ref(false);
-  const error: Ref<CombinedError | undefined> = ref();
-  const operation: Ref<Operation<T, V> | undefined> = ref();
-  const extensions: Ref<Record<string, any> | undefined> = ref();
+  const data: Ref<T | undefined> = shallowRef();
+
+  const { fetching, operation, extensions, stale, error } = useRequestState<
+    T,
+    V
+  >();
 
   return {
     data,
@@ -156,7 +155,7 @@ export function callUseMutation<T = any, V extends AnyVariables = AnyVariables>(
 
       return pipe(
         client.value.executeMutation<T, V>(
-          createRequest<T, V>(query, unwrapPossibleProxy(variables)),
+          createRequestWithArgs({ query, variables }),
           context || {}
         ),
         onPush(result => {

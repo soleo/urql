@@ -1,5 +1,79 @@
 # @urql/vue
 
+## 1.4.1
+
+### Patch Changes
+
+- Use `shallowRef` for data variable to avoid extra overhead for heavy objects
+  Submitted by [@yurks](https://github.com/yurks) (See [#3641](https://github.com/urql-graphql/urql/pull/3641))
+
+## 1.4.0
+
+### Minor Changes
+
+- Refactor composable functions with a focus on avoiding memory leaks and Vue best practices
+  Submitted by [@yurks](https://github.com/yurks) (See [#3619](https://github.com/urql-graphql/urql/pull/3619))
+
+## 1.3.2
+
+### Patch Changes
+
+- ⚠️ Fix deep options reactivity for subscriptions
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3616](https://github.com/urql-graphql/urql/pull/3616))
+
+## 1.3.1
+
+### Patch Changes
+
+- ⚠️ Fix variables losing reactivity
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3614](https://github.com/urql-graphql/urql/pull/3614))
+
+## 1.3.0
+
+### Minor Changes
+
+- Use `shallowRef` to avoid creating deeply reactive objects for heavy objects
+  Submitted by [@negezor](https://github.com/negezor) (See [#3611](https://github.com/urql-graphql/urql/pull/3611))
+- Remove wrapping request `args` in `reactive` to fix memory leak
+  Submitted by [@negezor](https://github.com/negezor) (See [#3612](https://github.com/urql-graphql/urql/pull/3612))
+
+## 1.2.2
+
+### Patch Changes
+
+- ⚠️ Fix reactaive typings for `variables` (See [#3605](https://github.com/urql-graphql/urql/pull/3605))
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [`118d74b2`](https://github.com/urql-graphql/urql/commit/118d74b238007264cacfb91fc12de74370d5766e))
+- Restore the possibility to use a getter for the pause property
+  Submitted by [@arkandias](https://github.com/arkandias) (See [#3598](https://github.com/urql-graphql/urql/pull/3598))
+
+## 1.2.1
+
+### Patch Changes
+
+- ⚠️ Fix regression causing `pause` argument on `useQuery` and `useSubscription` to not be reactive
+  Submitted by [@arkandias](https://github.com/arkandias) (See [#3595](https://github.com/urql-graphql/urql/pull/3595))
+
+## 1.2.0
+
+### Minor Changes
+
+- Mark `@urql/core` as a peer dependency as well as a regular dependency
+  Submitted by [@kitten](https://github.com/kitten) (See [#3579](https://github.com/urql-graphql/urql/pull/3579))
+
+### Patch Changes
+
+- ⚠️ Fix subscription handlers to not receive `null` values
+  Submitted by [@kitten](https://github.com/kitten) (See [#3581](https://github.com/urql-graphql/urql/pull/3581))
+- Add missing support for getter functions as input arguments values to `useQuery`, `useSubscription`, and `useMutation`
+  Submitted by [@kitten](https://github.com/kitten) (See [#3582](https://github.com/urql-graphql/urql/pull/3582))
+
+## 1.1.3
+
+### Patch Changes
+
+- Updated dependencies (See [#3520](https://github.com/urql-graphql/urql/pull/3520), [#3553](https://github.com/urql-graphql/urql/pull/3553), and [#3520](https://github.com/urql-graphql/urql/pull/3520))
+  - @urql/core@5.0.0
+
 ## 1.1.2
 
 ### Patch Changes

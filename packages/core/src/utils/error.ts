@@ -19,11 +19,11 @@ const generateErrorMessage = (
 const rehydrateGraphQlError = (error: any): GraphQLError => {
   if (
     error &&
-    error.message &&
+    typeof error.message === 'string' &&
     (error.extensions || error.name === 'GraphQLError')
   ) {
     return error;
-  } else if (typeof error === 'object' && error.message) {
+  } else if (typeof error === 'object' && typeof error.message === 'string') {
     return new GraphQLError(
       error.message,
       error.nodes,
@@ -114,7 +114,7 @@ export class CombinedError extends Error {
     this.response = input.response;
   }
 
-  toString() {
+  toString(): string {
     return this.message;
   }
 }

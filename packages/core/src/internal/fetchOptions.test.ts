@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { expect, describe, it } from 'vitest';
+import { Kind } from '@0no-co/graphql.web';
 import { makeOperation } from '../utils/operation';
 import { queryOperation, mutationOperation } from '../test-utils';
 import { makeFetchBody, makeFetchURL, makeFetchOptions } from './fetchOptions';
@@ -10,6 +11,7 @@ describe('makeFetchBody', () => {
     const body = makeFetchBody(queryOperation);
     expect(body).toMatchInlineSnapshot(`
       {
+        "documentId": undefined,
         "extensions": undefined,
         "operationName": "getUser",
         "query": "query getUser($name: String) {
@@ -42,6 +44,22 @@ describe('makeFetchBody', () => {
     apqOperation.extensions.persistedQuery!.miss = true;
     expect(makeFetchBody(apqOperation).query).not.toBe(undefined);
   });
+
+  it('omits the query property when query is a persisted document', () => {
+    // A persisted documents is one that carries a `documentId` property and
+    // has no definitions
+    const persistedOperation = makeOperation(queryOperation.kind, {
+      ...queryOperation,
+      query: {
+        kind: Kind.DOCUMENT,
+        definitions: [],
+        documentId: 'TestDocumentId',
+      },
+    });
+
+    expect(makeFetchBody(persistedOperation).query).toBe(undefined);
+    expect(makeFetchBody(persistedOperation).documentId).toBe('TestDocumentId');
+  });
 });
 
 describe('makeFetchURL', () => {
@@ -50,6 +68,14 @@ describe('makeFetchURL', () => {
     expect(makeFetchURL(queryOperation, body)).toBe(
       'http://localhost:3000/graphql'
     );
+  });
+
+  it('returns the URL by default when only a path is provided', () => {
+    const operation = makeOperation(queryOperation.kind, queryOperation, {
+      url: '/graphql',
+    });
+    const body = makeFetchBody(operation);
+    expect(makeFetchURL(operation, body)).toBe('/graphql');
   });
 
   it('returns a query parameter URL when GET is preferred', () => {
@@ -61,6 +87,18 @@ describe('makeFetchURL', () => {
     const body = makeFetchBody(operation);
     expect(makeFetchURL(operation, body)).toMatchInlineSnapshot(
       '"http://localhost:3000/graphql?query=query+getUser%28%24name%3A+String%29+%7B%0A++user%28name%3A+%24name%29+%7B%0A++++id%0A++++firstName%0A++++lastName%0A++%7D%0A%7D&operationName=getUser&variables=%7B%22name%22%3A%22Clara%22%7D"'
+    );
+  });
+
+  it('returns a query parameter URL when GET is preferred and only a path is provided', () => {
+    const operation = makeOperation(queryOperation.kind, queryOperation, {
+      url: '/graphql',
+      preferGetMethod: true,
+    });
+
+    const body = makeFetchBody(operation);
+    expect(makeFetchURL(operation, body)).toMatchInlineSnapshot(
+      '"/graphql?query=query+getUser%28%24name%3A+String%29+%7B%0A++user%28name%3A+%24name%29+%7B%0A++++id%0A++++firstName%0A++++lastName%0A++%7D%0A%7D&operationName=getUser&variables=%7B%22name%22%3A%22Clara%22%7D"'
     );
   });
 
@@ -101,6 +139,52 @@ describe('makeFetchOptions', () => {
         "headers": {
           "accept": "application/graphql-response+json, application/graphql+json, application/json, text/event-stream, multipart/mixed",
           "content-type": "application/json",
+        },
+        "method": "POST",
+      }
+    `);
+  });
+
+  it('handles the Headers object', () => {
+    const headers = new Headers();
+    headers.append('x-test', 'true');
+    const operation = makeOperation(queryOperation.kind, queryOperation, {
+      ...queryOperation.context,
+      fetchOptions: {
+        headers,
+      },
+    });
+    const body = makeFetchBody(operation);
+
+    expect(makeFetchOptions(operation, body)).toMatchInlineSnapshot(`
+      {
+        "body": "{\\"operationName\\":\\"getUser\\",\\"query\\":\\"query getUser($name: String) {\\\\n  user(name: $name) {\\\\n    id\\\\n    firstName\\\\n    lastName\\\\n  }\\\\n}\\",\\"variables\\":{\\"name\\":\\"Clara\\"}}",
+        "headers": {
+          "accept": "application/graphql-response+json, application/graphql+json, application/json, text/event-stream, multipart/mixed",
+          "content-type": "application/json",
+          "x-test": "true",
+        },
+        "method": "POST",
+      }
+    `);
+  });
+
+  it('handles an Array headers init', () => {
+    const operation = makeOperation(queryOperation.kind, queryOperation, {
+      ...queryOperation.context,
+      fetchOptions: {
+        headers: [['x-test', 'true']],
+      },
+    });
+    const body = makeFetchBody(operation);
+
+    expect(makeFetchOptions(operation, body)).toMatchInlineSnapshot(`
+      {
+        "body": "{\\"operationName\\":\\"getUser\\",\\"query\\":\\"query getUser($name: String) {\\\\n  user(name: $name) {\\\\n    id\\\\n    firstName\\\\n    lastName\\\\n  }\\\\n}\\",\\"variables\\":{\\"name\\":\\"Clara\\"}}",
+        "headers": {
+          "accept": "application/graphql-response+json, application/graphql+json, application/json, text/event-stream, multipart/mixed",
+          "content-type": "application/json",
+          "x-test": "true",
         },
         "method": "POST",
       }

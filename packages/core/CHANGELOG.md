@@ -1,5 +1,109 @@
 # @urql/core
 
+## 5.0.6
+
+### Patch Changes
+
+- Allow empty error messages when re-hydrating GraphQL errors
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3650](https://github.com/urql-graphql/urql/pull/3650))
+
+## 5.0.5
+
+### Patch Changes
+
+- Removes double serialization of `data` in `ssrExchange`
+  Submitted by [@negezor](https://github.com/negezor) (See [#3632](https://github.com/urql-graphql/urql/pull/3632))
+
+## 5.0.4
+
+### Patch Changes
+
+- Change how we calculate the `OperationKey` to take files into account, before we
+  would encode them to `null` resulting in every mutation with the same variables
+  (excluding the files) to have the same key. This resulted in mutations that upload
+  different files at the same time to share a result in GraphCache
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3601](https://github.com/urql-graphql/urql/pull/3601))
+
+## 5.0.3
+
+### Patch Changes
+
+- Use `documentId` from persisted documents for document keys, when it's available
+  Submitted by [@kitten](https://github.com/kitten) (See [#3575](https://github.com/urql-graphql/urql/pull/3575))
+
+## 5.0.2
+
+### Patch Changes
+
+- ⚠️ Fix issue where a reexecute on an in-flight operation would lead to multiple network-requests.
+  For example, this issue presents itself when Graphcache is concurrently updating multiple, inter-dependent queries with shared entities. One query completing while others are still in-flight may lead to duplicate operations being issued
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3573](https://github.com/urql-graphql/urql/pull/3573))
+
+## 5.0.1
+
+### Patch Changes
+
+- ⚠️ Fix `@ts-ignore` on TypeScript peer dependency import in typings not being applied due to a leading `!` character
+  Submitted by [@kitten](https://github.com/kitten) (See [#3567](https://github.com/urql-graphql/urql/pull/3567))
+
+## 5.0.0
+
+### Major Changes
+
+- Remove deprecated `dedupExchange`
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3520](https://github.com/urql-graphql/urql/pull/3520))
+- Remove deprecated `maskTypename`
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3520](https://github.com/urql-graphql/urql/pull/3520))
+
+### Patch Changes
+
+- Upgrade `@0no-co/graphql.web` to `1.0.5`
+  Submitted by [@kitten](https://github.com/kitten) (See [#3553](https://github.com/urql-graphql/urql/pull/3553))
+
+## 4.3.0
+
+### Minor Changes
+
+- Support [Apollo Federation's format](https://www.apollographql.com/docs/router/executing-operations/subscription-multipart-protocol/) for subscription results in `multipart/mixed` responses (result properties essentially are namespaced on a `payload` key)
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3499](https://github.com/urql-graphql/urql/pull/3499))
+- Add support for sending persisted documents. Any `DocumentNode` with no/empty definitions and a `documentId` property is considered a persisted document. When this is detected a `documentId` parameter rather than a `query` string is sent to the GraphQL API, similar to Automatic Persisted Queries (APQs). However, APQs are only supported via `@urql/exchange-persisted`, while support for `documentId` is now built-in
+  Submitted by [@kitten](https://github.com/kitten) (See [#3515](https://github.com/urql-graphql/urql/pull/3515))
+
+### Patch Changes
+
+- Allow `url` to be a plain, non-URL pathname (i.e. `/api/graphql`) to be used with `preferGetMethod`
+  Submitted by [@akrantz01](https://github.com/akrantz01) (See [#3514](https://github.com/urql-graphql/urql/pull/3514))
+- Correctly support the `Headers` class being used in `fetchOptions`
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3505](https://github.com/urql-graphql/urql/pull/3505))
+
+## 4.2.3
+
+### Patch Changes
+
+- Add back our cache-outcome on the document-cache, this was behind a development flag however in our normalized cache we always add it already
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3464](https://github.com/urql-graphql/urql/pull/3464))
+
+## 4.2.2
+
+### Patch Changes
+
+- ⚠️ Fix the default `cacheExchange` crashing on `cache-only` request policies with cache misses due to `undefined` results
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3459](https://github.com/urql-graphql/urql/pull/3459))
+
+## 4.2.1
+
+### Patch Changes
+
+- ⚠️ Fix incorrect JSON stringification of objects from different JS contexts. This could lead to invalid variables being generated in the Vercel Edge runtime specifically
+  Submitted by [@SoraKumo001](https://github.com/SoraKumo001) (See [#3453](https://github.com/urql-graphql/urql/pull/3453))
+
+## 4.2.0
+
+### Minor Changes
+
+- Try to parse `text/plain` content-type as JSON before bailing out with an error
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3430](https://github.com/urql-graphql/urql/pull/3430))
+
 ## 4.1.4
 
 ### Patch Changes

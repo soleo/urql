@@ -32,6 +32,7 @@ import {
   noopDataState,
   hydrateData,
   reserveLayer,
+  hasLayer,
 } from './store/data';
 
 interface OperationResultWithMeta extends Partial<OperationResult> {
@@ -73,6 +74,7 @@ export const cacheExchange =
       store.data.hydrating = true;
       opts.storage.readData().then(entries => {
         hydrateData(store.data, opts!.storage!, entries);
+        if (opts.storage!.onCacheHydrated) opts.storage!.onCacheHydrated();
       });
     }
 
@@ -376,6 +378,14 @@ export const cacheExchange =
               (requestPolicy === 'cache-first' &&
                 res.outcome === 'partial' &&
                 !reexecutingOperations.has(res.operation.key)));
+          // Set stale to true anyway, even if the reexecute will be blocked, if the operation
+          // is in progress. We can be reasonably sure of that if a layer has been reserved for it.
+          const stale =
+            requestPolicy !== 'cache-only' &&
+            (shouldReexecute ||
+              (res.outcome === 'partial' &&
+                reexecutingOperations.has(res.operation.key) &&
+                hasLayer(store.data, res.operation.key)));
 
           const result: OperationResult = {
             operation: addMetadata(res.operation, {
@@ -384,7 +394,7 @@ export const cacheExchange =
             data: res.data,
             error: res.error,
             extensions: res.extensions,
-            stale: shouldReexecute && !res.hasNext,
+            stale: stale && !res.hasNext,
             hasNext: shouldReexecute && res.hasNext,
           };
 

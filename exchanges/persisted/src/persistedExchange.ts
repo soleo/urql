@@ -89,6 +89,16 @@ export interface PersistedExchangeOptions {
    * their GraphQL APIs.
    */
   enableForMutation?: boolean;
+  /** Enables persisted queries to be used for subscriptions.
+   *
+   * @remarks
+   * When enabled, the `persistedExchange` will also use the persisted queries
+   * logic for subscription operations.
+   *
+   * This is disabled by default, but often used on APIs that obfuscate
+   * their GraphQL APIs.
+   */
+  enableForSubscriptions?: boolean;
 }
 
 /** Exchange factory that adds support for Persisted Queries.
@@ -131,12 +141,14 @@ export const persistedExchange =
     const enforcePersistedQueries = !!options.enforcePersistedQueries;
     const hashFn = options.generateHash || hash;
     const enableForMutation = !!options.enableForMutation;
+    const enableForSubscriptions = !!options.enableForSubscriptions;
     let supportsPersistedQueries = true;
 
     const operationFilter = (operation: Operation) =>
       supportsPersistedQueries &&
       !operation.context.persistAttempt &&
       ((enableForMutation && operation.kind === 'mutation') ||
+        (enableForSubscriptions && operation.kind === 'subscription') ||
         operation.kind === 'query');
 
     const getPersistedOperation = async (operation: Operation) => {
@@ -216,6 +228,18 @@ export const persistedExchange =
               retries.next(followupOperation);
               return null;
             } else if (result.error && isPersistedMiss(result.error)) {
+              if (result.operation.extensions.persistedQuery.miss) {
+                if (process.env.NODE_ENV !== 'production') {
+                  console.warn(
+                    'persistedExchange()’s results include two misses for the same operation.\n' +
+                      'This is not expected as it means a persisted error has been delivered for a non-persisted query!\n' +
+                      'Another exchange with a cache may be delivering an outdated result. For example, a server-side ssrExchange() may be caching an errored result.\n' +
+                      'Try moving the persistedExchange() in past these exchanges, for example in front of your fetchExchange.'
+                  );
+                }
+
+                return result;
+              }
               // Update operation with unsupported attempt
               const followupOperation = makeOperation(
                 result.operation.kind,

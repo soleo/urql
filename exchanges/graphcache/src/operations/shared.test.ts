@@ -34,6 +34,7 @@ describe('makeSelectionIterator', () => {
       'Query',
       'Query',
       false,
+      undefined,
       selection,
       ctx
     );
@@ -46,8 +47,8 @@ describe('makeSelectionIterator', () => {
       [
         {
           "alias": undefined,
-          "arguments": [],
-          "directives": [],
+          "arguments": undefined,
+          "directives": undefined,
           "kind": "Field",
           "name": {
             "kind": "Name",
@@ -57,8 +58,8 @@ describe('makeSelectionIterator', () => {
         },
         {
           "alias": undefined,
-          "arguments": [],
-          "directives": [],
+          "arguments": undefined,
+          "directives": undefined,
           "kind": "Field",
           "name": {
             "kind": "Name",
@@ -68,8 +69,8 @@ describe('makeSelectionIterator', () => {
         },
         {
           "alias": undefined,
-          "arguments": [],
-          "directives": [],
+          "arguments": undefined,
+          "directives": undefined,
           "kind": "Field",
           "name": {
             "kind": "Name",
@@ -93,6 +94,7 @@ describe('makeSelectionIterator', () => {
       'Query',
       'Query',
       false,
+      undefined,
       selection,
       ctx
     );
@@ -123,6 +125,7 @@ describe('makeSelectionIterator', () => {
       'Query',
       'Query',
       false,
+      undefined,
       selection,
       ctx
     );
@@ -135,8 +138,8 @@ describe('makeSelectionIterator', () => {
       [
         {
           "alias": undefined,
-          "arguments": [],
-          "directives": [],
+          "arguments": undefined,
+          "directives": undefined,
           "kind": "Field",
           "name": {
             "kind": "Name",
@@ -146,8 +149,8 @@ describe('makeSelectionIterator', () => {
         },
         {
           "alias": undefined,
-          "arguments": [],
-          "directives": [],
+          "arguments": undefined,
+          "directives": undefined,
           "kind": "Field",
           "name": {
             "kind": "Name",
@@ -157,8 +160,8 @@ describe('makeSelectionIterator', () => {
         },
         {
           "alias": undefined,
-          "arguments": [],
-          "directives": [],
+          "arguments": undefined,
+          "directives": undefined,
           "kind": "Field",
           "name": {
             "kind": "Name",
@@ -208,6 +211,7 @@ describe('makeSelectionIterator', () => {
       'Query',
       'Query',
       false,
+      undefined,
       selection,
       ctx
     );
@@ -243,6 +247,7 @@ describe('makeSelectionIterator', () => {
       'Query',
       'Query',
       true,
+      undefined,
       selection,
       ctx
     );

@@ -10,7 +10,7 @@ As you use it in your app, it's split into three parts:
 
 - Bindings — such as for React, Preact, Vue, or Svelte — which interact with `@urql/core`'s
   `Client`.
-- The Client — as created [with the core `@urql/core` package](./basics/code.md), which interacts with "exchanges" to execute GraphQL
+- The Client — as created [with the core `@urql/core` package](./basics/core.md), which interacts with "exchanges" to execute GraphQL
   operations, and which you can also use directly.
 - Exchanges, which provide functionality like fetching or caching to the `Client`.
 
@@ -35,7 +35,7 @@ Specifically, `urql` simplifies three common aspects of using GraphQL:
 - Abstracting _caching_ and state management internally
 - Providing a central point of _extensibility_ and integration with your API
 
-In the following sections we'll talk about the way that `urql` solves these three problems and how the logic abstracted away internally.
+In the following sections we'll talk about the way that `urql` solves these three problems and how the logic is abstracted away internally.
 
 ## Requests and Operations on the Client
 

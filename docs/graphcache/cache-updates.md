@@ -7,7 +7,7 @@ order: 4
 
 As we've learned [on the page on "Normalized
 Caching"](./normalized-caching.md#normalizing-relational-data), when Graphcache receives an API
-result it will traverse and store all its data to its cache in a normalised structure. Each entity
+result it will traverse and store all its data to its cache in a normalized structure. Each entity
 that is found in a result will be stored under the entity's key.
 
 A query's result is represented as a graph, which can also be understood as a tree structure,
@@ -260,8 +260,10 @@ cacheExchange({
         `;
 
         cache.updateQuery({ query: TodoList }, data => {
-          data.todos.push(result.createTodo);
-          return data;
+          return {
+            ...data,
+            todos: [...data.todos, result.createTodo],
+          };
         });
       },
     },
@@ -299,8 +301,7 @@ cacheExchange({
       createTodo(result, _args, cache, _info) {
         const todos = cache.resolve('Query', 'todos');
         if (Array.isArray(todos)) {
-          todos.push(result.createTodo);
-          cache.link('Query', 'todos', todos);
+          cache.link('Query', 'todos', [...todos, result.createTodo]);
         }
       },
     },
@@ -489,12 +490,31 @@ In this example we've attached an updater to a `Mutation.updateTodo` field. We r
 mutation by enumerating all `todos` listing fields using `cache.inspectFields` and targetedly
 invalidate only these fields, which causes all queries using these listing fields to be refetched.
 
+### Invalidating a type
+
+We can also invalidate all the entities of a given type, this could be handy in the case of a
+list update or when you aren't sure what entity is affected.
+
+This can be done by only passing the relevant `__typename` to the `invalidate` function.
+
+```js
+cacheExchange({
+  updates: {
+    Mutation: {
+      deleteTodo(_result, args, cache, _info) {
+        cache.invalidate('Todo');
+      },
+    },
+  },
+});
+```
+
 ## Optimistic updates
 
 If we know what result a mutation may return, why wait for the GraphQL API to fulfill our mutations?
 
-Additionally to the `updates` configuration we may also pass an `optimistic` option to the
-`cacheExchange` which is a factory function using, which we can create a "virtual" result for a
+In addition to the `updates` configuration, we can also pass an `optimistic` option to the
+`cacheExchange`. This option is a factory function that allows us to create a "virtual" result for a
 mutation. This temporary result can be applied immediately to the cache to give our users the
 illusion that mutations were executed immediately, which is a great method to reduce waiting time
 and to make our apps feel snappier.

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
 import { minifyIntrospectionQuery } from '@urql/introspection';
-import { formatDocument, gql, maskTypename } from '@urql/core';
+import { formatDocument, gql } from '@urql/core';
 import { vi, expect, it, beforeEach, describe } from 'vitest';
 
 import {
@@ -102,7 +102,26 @@ describe('Store', () => {
     write(store, { query: TodosWithoutTypename }, todosData);
     const result = query(store, { query: TodosWithoutTypename });
     expect(result.data).toEqual({
-      ...maskTypename(todosData),
+      todos: [
+        {
+          id: '0',
+          text: 'Go to the shops',
+          complete: false,
+          author: { id: '0', name: 'Jovi' },
+        },
+        {
+          id: '1',
+          text: 'Pick up the kids',
+          complete: true,
+          author: { id: '1', name: 'Phil' },
+        },
+        {
+          id: '2',
+          text: 'Install urql',
+          complete: false,
+          author: { id: '0', name: 'Jovi' },
+        },
+      ],
       __typename: 'Query',
     });
   });
@@ -837,9 +856,25 @@ describe('Store with OptimisticMutationConfig', () => {
   });
 
   describe('Invalidating an entity', () => {
-    it('removes an entity from a list.', () => {
+    it('removes an entity from a list by object-key.', () => {
       InMemoryData.initDataState('write', store.data, null);
       store.invalidate(todosData.todos[1]);
+      const { data } = query(store, { query: Todos });
+      expect(data).toBe(null);
+    });
+
+    it('removes an entity from a list by string-key.', () => {
+      InMemoryData.initDataState('write', store.data, null);
+      store.invalidate(store.keyOfEntity(todosData.todos[1]));
+      const { data } = query(store, { query: Todos });
+      expect(data).toBe(null);
+    });
+  });
+
+  describe('Invalidating a type', () => {
+    it('removes an entity from a list.', () => {
+      InMemoryData.initDataState('write', store.data, null);
+      store.invalidate('Todo');
       const { data } = query(store, { query: Todos });
       expect(data).toBe(null);
     });

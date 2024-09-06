@@ -12,6 +12,10 @@ import type {
   RequestExtensions,
 } from '../types';
 
+type PersistedDocumentNode = TypedDocumentNode & {
+  documentId?: string;
+};
+
 /** A `DocumentNode` annotated with its hashed key.
  * @internal
  */
@@ -23,15 +27,21 @@ const SOURCE_NAME = 'gql';
 const GRAPHQL_STRING_RE = /("{3}[\s\S]*"{3}|"(?:\\.|[^"])*")/g;
 const REPLACE_CHAR_RE = /(?:#[^\n\r]+)?(?:[\r\n]+|$)/g;
 
-const replaceOutsideStrings = (str: string, idx: number) =>
+const replaceOutsideStrings = (str: string, idx: number): string =>
   idx % 2 === 0 ? str.replace(REPLACE_CHAR_RE, '\n') : str;
 
 /** Sanitizes a GraphQL document string by replacing comments and redundant newlines in it. */
 const sanitizeDocument = (node: string): string =>
   node.split(GRAPHQL_STRING_RE).map(replaceOutsideStrings).join('').trim();
 
-const prints = new Map<DocumentNode | DefinitionNode, string>();
-const docs = new Map<HashValue, KeyedDocumentNode>();
+const prints: Map<DocumentNode | DefinitionNode, string> = new Map<
+  DocumentNode | DefinitionNode,
+  string
+>();
+const docs: Map<HashValue, KeyedDocumentNode> = new Map<
+  HashValue,
+  KeyedDocumentNode
+>();
 
 /** A cached printing function for GraphQL documents.
  *
@@ -90,11 +100,16 @@ export const stringifyDocument = (
 const hashDocument = (
   node: string | DefinitionNode | DocumentNode
 ): HashValue => {
-  let key = phash(stringifyDocument(node));
-  // Add the operation name to the produced hash
-  if ((node as DocumentNode).definitions) {
-    const operationName = getOperationName(node as DocumentNode);
-    if (operationName) key = phash(`\n# ${operationName}`, key);
+  let key: HashValue;
+  if ((node as PersistedDocumentNode).documentId) {
+    key = phash((node as PersistedDocumentNode).documentId!);
+  } else {
+    key = phash(stringifyDocument(node));
+    // Add the operation name to the produced hash
+    if ((node as DocumentNode).definitions) {
+      const operationName = getOperationName(node as DocumentNode);
+      if (operationName) key = phash(`\n# ${operationName}`, key);
+    }
   }
   return key;
 };
@@ -154,7 +169,7 @@ export const createRequest = <
 ): GraphQLRequest<Data, Variables> => {
   const variables = _variables || ({} as Variables);
   const query = keyDocument(_query);
-  const printedVars = stringifyVariables(variables);
+  const printedVars = stringifyVariables(variables, true);
   let key = query.__key;
   if (printedVars !== '{}') key = phash(printedVars, key);
   return { key, query, variables, extensions };

@@ -9,6 +9,7 @@ import {
   addMetadata,
   collectTypenames,
   formatDocument,
+  makeResult,
 } from '../utils';
 
 type ResultCache = Map<number, OperationResult>;
@@ -79,15 +80,18 @@ export const cacheExchange: Exchange = ({ forward, client, dispatchDebug }) => {
               }),
         });
 
-        let result: OperationResult = cachedResult!;
-        if (process.env.NODE_ENV !== 'production') {
-          result = {
-            ...result,
-            operation: addMetadata(operation, {
-              cacheOutcome: cachedResult ? 'hit' : 'miss',
-            }),
-          };
-        }
+        let result: OperationResult =
+          cachedResult ||
+          makeResult(operation, {
+            data: null,
+          });
+
+        result = {
+          ...result,
+          operation: addMetadata(operation, {
+            cacheOutcome: cachedResult ? 'hit' : 'miss',
+          }),
+        };
 
         if (operation.context.requestPolicy === 'cache-and-network') {
           result.stale = true;

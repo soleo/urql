@@ -43,7 +43,6 @@ import type {
 import {
   createRequest,
   withPromise,
-  maskTypename,
   noop,
   makeOperation,
   getOperationType,
@@ -119,7 +118,7 @@ export interface ClientOptions {
    * This is the basis for how `urql` handles GraphQL operations, and exchanges handle the creation, execution,
    * and control flow of exchanges for the `Client`.
    *
-   * To easily get started you should consider using the {@link dedupExchange}, {@link cacheExchange} and {@link fetchExchange}
+   * To easily get started you should consider using the {@link cacheExchange} and {@link fetchExchange}
    * these are all exported from the core package.
    *
    * @see {@link https://urql.dev/goto/docs/architecture/#the-client-and-exchanges} for more information
@@ -168,28 +167,6 @@ export interface ClientOptions {
    * requests for queries.
    */
   preferGetMethod?: boolean | 'force' | 'within-url-limit';
-  /** Instructs the `Client` to remove `__typename` properties on all results.
-   *
-   * @deprecated Not recommended over modelling inputs manually (See #3299)
-   *
-   * @remarks
-   * By default, cache exchanges will alter your GraphQL documents to request `__typename` fields
-   * for all selections. However, this means that your GraphQL data will now contain `__typename` fields you
-   * didn't ask for. This is why the {@link Client} supports “masking” this field by marking it
-   * as non-enumerable via this option.
-   *
-   * Only use this option if you absolutely have to. It's popular to model mutation inputs in
-   * GraphQL schemas after the object types they modify, and if you're using this option to make
-   * it possible to directly pass objects from results as inputs to your mutation variables, it's
-   * more performant and idomatic to instead create a new input object.
-   *
-   * Hint: With `@urql/exchange-graphcache` you will never need this option, as it selects fields on
-   * the client-side according to which fields you specified, rather than the fields it modified.
-   *
-   * @see {@link https://spec.graphql.org/October2021/#sec-Type-Name-Introspection} for more information
-   * on typename introspection via the `__typename` field.
-   */
-  maskTypename?: boolean;
 }
 
 /** The `Client` is the central hub for your GraphQL operations and holds `urql`'s state.
@@ -630,14 +607,6 @@ export const Client: new (opts: ClientOptions) => Client = function Client(
       )
     );
 
-    // Mask typename properties if the option for it is turned on
-    if (opts.maskTypename) {
-      result$ = pipe(
-        result$,
-        map(res => ({ ...res, data: maskTypename(res.data, true) }))
-      );
-    }
-
     if (operation.kind !== 'query') {
       // Interrupt subscriptions and mutations when they have no more results
       result$ = pipe(
@@ -674,12 +643,17 @@ export const Client: new (opts: ClientOptions) => Client = function Client(
         // Store replay result
         onPush(result => {
           if (result.stale) {
-            // If the current result has queued up an operation of the same
-            // key, then `stale` refers to it
-            for (const operation of queue) {
-              if (operation.key === result.operation.key) {
-                dispatched.delete(operation.key);
-                break;
+            if (!result.hasNext) {
+              // we are dealing with an optimistic mutation or a partial result
+              dispatched.delete(operation.key);
+            } else {
+              // If the current result has queued up an operation of the same
+              // key, then `stale` refers to it
+              for (const operation of queue) {
+                if (operation.key === result.operation.key) {
+                  dispatched.delete(operation.key);
+                  break;
+                }
               }
             }
           } else if (!result.hasNext) {
@@ -728,13 +702,29 @@ export const Client: new (opts: ClientOptions) => Client = function Client(
       // operation's exchange results
       if (operation.kind === 'teardown') {
         dispatchOperation(operation);
-      } else if (operation.kind === 'mutation' || active.has(operation.key)) {
-        let queued = false;
-        for (let i = 0; i < queue.length; i++)
-          queued = queued || queue[i].key === operation.key;
-        if (!queued) dispatched.delete(operation.key);
+      } else if (operation.kind === 'mutation') {
         queue.push(operation);
         Promise.resolve().then(dispatchOperation);
+      } else if (active.has(operation.key)) {
+        let queued = false;
+        for (let i = 0; i < queue.length; i++) {
+          if (queue[i].key === operation.key) {
+            queue[i] = operation;
+            queued = true;
+          }
+        }
+
+        if (
+          !queued &&
+          (!dispatched.has(operation.key) ||
+            operation.context.requestPolicy === 'network-only')
+        ) {
+          queue.push(operation);
+          Promise.resolve().then(dispatchOperation);
+        } else {
+          dispatched.delete(operation.key);
+          Promise.resolve().then(dispatchOperation);
+        }
       }
     },
 

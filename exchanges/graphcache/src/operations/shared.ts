@@ -8,10 +8,23 @@ import type {
 import { Kind } from '@0no-co/graphql.web';
 
 import type { SelectionSet } from '../ast';
-import { isDeferred, getTypeCondition, getSelectionSet, getName } from '../ast';
+import {
+  isDeferred,
+  getTypeCondition,
+  getSelectionSet,
+  getName,
+  isOptional,
+} from '../ast';
 
 import { warn, pushDebugNode, popDebugNode } from '../helpers/help';
-import { hasField, currentOperation, currentOptimistic } from '../store/data';
+import {
+  hasField,
+  currentOperation,
+  currentOptimistic,
+  writeConcreteType,
+  getConcreteTypes,
+  isSeenConcreteType,
+} from '../store/data';
 import { keyOfField } from '../store/keys';
 import type { Store } from '../store/store';
 
@@ -25,6 +38,7 @@ import type {
   Link,
   Entity,
   Data,
+  Logger,
 } from '../types';
 
 export interface Context {
@@ -48,6 +62,7 @@ export interface Context {
 
 export let contextRef: Context | null = null;
 export let deferRef = false;
+export let optionalRef: boolean | undefined = undefined;
 
 // Checks whether the current data field is a cache miss because of a GraphQLError
 export const getFieldError = (ctx: Context): ErrorLike | undefined =>
@@ -117,7 +132,8 @@ const isFragmentHeuristicallyMatching = (
   node: FormattedNode<InlineFragmentNode | FragmentDefinitionNode>,
   typename: void | string,
   entityKey: string,
-  vars: Variables
+  vars: Variables,
+  logger?: Logger
 ) => {
   if (!typename) return false;
   const typeCondition = getTypeCondition(node);
@@ -134,30 +150,48 @@ const isFragmentHeuristicallyMatching = (
       '` may be an ' +
       'interface.\nA schema needs to be defined for this match to be deterministic, ' +
       'otherwise the fragment will be matched heuristically!',
-    16
+    16,
+    logger
   );
 
-  return (
-    currentOperation === 'write' ||
-    !getSelectionSet(node).some(node => {
-      if (node.kind !== Kind.FIELD) return false;
-      const fieldKey = keyOfField(getName(node), getFieldArguments(node, vars));
-      return !hasField(entityKey, fieldKey);
-    })
-  );
+  return !getSelectionSet(node).some(node => {
+    if (node.kind !== Kind.FIELD) return false;
+    const fieldKey = keyOfField(getName(node), getFieldArguments(node, vars));
+    return !hasField(entityKey, fieldKey);
+  });
 };
 
 interface SelectionIterator {
   (): FormattedNode<FieldNode> | undefined;
 }
 
-export const makeSelectionIterator = (
-  typename: void | string,
+// NOTE: Outside of this file, we expect `_defer` to always be reset to `false`
+export function makeSelectionIterator(
+  typename: undefined | string,
   entityKey: string,
-  defer: boolean,
+  _defer: false,
+  _optional: undefined,
   selectionSet: FormattedNode<SelectionSet>,
   ctx: Context
-): SelectionIterator => {
+): SelectionIterator;
+// NOTE: Inside this file we expect the state to be recursively passed on
+export function makeSelectionIterator(
+  typename: undefined | string,
+  entityKey: string,
+  _defer: boolean,
+  _optional: undefined | boolean,
+  selectionSet: FormattedNode<SelectionSet>,
+  ctx: Context
+): SelectionIterator;
+
+export function makeSelectionIterator(
+  typename: undefined | string,
+  entityKey: string,
+  _defer: boolean,
+  _optional: boolean | undefined,
+  selectionSet: FormattedNode<SelectionSet>,
+  ctx: Context
+): SelectionIterator {
   let child: SelectionIterator | void;
   let index = 0;
 
@@ -165,7 +199,8 @@ export const makeSelectionIterator = (
     let node: FormattedNode<FieldNode> | undefined;
     while (child || index < selectionSet.length) {
       node = undefined;
-      deferRef = defer;
+      deferRef = _defer;
+      optionalRef = _optional;
       if (child) {
         if ((node = child())) {
           return node;
@@ -188,19 +223,41 @@ export const makeSelectionIterator = (
               !fragment.typeCondition ||
               (ctx.store.schema
                 ? isInterfaceOfType(ctx.store.schema, fragment, typename)
-                : isFragmentHeuristicallyMatching(
+                : (currentOperation === 'read' &&
+                    isFragmentMatching(
+                      fragment.typeCondition.name.value,
+                      typename
+                    )) ||
+                  isFragmentHeuristicallyMatching(
                     fragment,
                     typename,
                     entityKey,
-                    ctx.variables
+                    ctx.variables,
+                    ctx.store.logger
                   ));
-            if (isMatching) {
+
+            if (
+              isMatching ||
+              (currentOperation === 'write' && !ctx.store.schema)
+            ) {
               if (process.env.NODE_ENV !== 'production')
                 pushDebugNode(typename, fragment);
+              const isFragmentOptional = isOptional(select);
+              if (
+                isMatching &&
+                fragment.typeCondition &&
+                typename !== fragment.typeCondition.name.value
+              ) {
+                writeConcreteType(fragment.typeCondition.name.value, typename!);
+              }
+
               child = makeSelectionIterator(
                 typename,
                 entityKey,
-                defer || isDeferred(select, ctx.variables),
+                _defer || isDeferred(select, ctx.variables),
+                isFragmentOptional !== undefined
+                  ? isFragmentOptional
+                  : _optional,
                 getSelectionSet(fragment),
                 ctx
               );
@@ -212,6 +269,17 @@ export const makeSelectionIterator = (
       }
     }
   };
+}
+
+const isFragmentMatching = (typeCondition: string, typename: string | void) => {
+  if (!typename) return false;
+  if (typeCondition === typename) return true;
+
+  const isProbableAbstractType = !isSeenConcreteType(typeCondition);
+  if (!isProbableAbstractType) return false;
+
+  const types = getConcreteTypes(typeCondition);
+  return types.size && types.has(typename);
 };
 
 export const ensureData = (x: DataField): Data | NullArray<Data> | null =>
@@ -234,7 +302,8 @@ export const ensureLink = (store: Store, ref: Link<Entity>): Link => {
         '\nYou have to pass an `id` or `_id` field or create a custom `keys` config for `' +
         ref.__typename +
         '`.',
-      12
+      12,
+      store.logger
     );
   }
 

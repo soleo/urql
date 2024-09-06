@@ -47,6 +47,8 @@ export interface InMemoryData {
   records: NodeMap<EntityField>;
   /** A map of entity links which are connections from one entity to another (key-value entries per entity) */
   links: NodeMap<Link>;
+  /** A map of typename to a list of entity-keys belonging to said type */
+  types: Map<string, Set<string>>;
   /** A set of Query operation keys that are in-flight and deferred/streamed */
   deferredKeys: Set<number>;
   /** A set of Query operation keys that are in-flight and awaiting a result */
@@ -57,6 +59,8 @@ export interface InMemoryData {
   optimisticOrder: number[];
   /** This may be a persistence adapter that will receive changes in a batch */
   storage: StorageAdapter | null;
+  /** A map of all the types we have encountered that did not map directly to a concrete type */
+  abstractToConcreteMap: Map<string, Set<string>>;
 }
 
 let currentOwnership: null | WeakSet<any> = null;
@@ -234,10 +238,12 @@ export const getCurrentDependencies = (): Dependencies => {
   return currentDependencies;
 };
 
+const DEFAULT_EMPTY_SET = new Set<string>();
 export const make = (queryRootKey: string): InMemoryData => ({
   hydrating: false,
   defer: false,
   gc: new Set(),
+  types: new Map(),
   persist: new Set(),
   queryRootKey,
   refCount: new Map(),
@@ -245,6 +251,7 @@ export const make = (queryRootKey: string): InMemoryData => ({
     optimistic: new Map(),
     base: new Map(),
   },
+  abstractToConcreteMap: new Map(),
   records: {
     optimistic: new Map(),
     base: new Map(),
@@ -334,10 +341,14 @@ const getNode = <T>(
   return node !== undefined ? node[fieldKey] : undefined;
 };
 
+export function getRefCount(entityKey: string): number {
+  return currentData!.refCount.get(entityKey) || 0;
+}
+
 /** Adjusts the reference count of an entity on a refCount dict by "by" and updates the gc */
 const updateRCForEntity = (entityKey: string, by: number): void => {
   // Retrieve the reference count and adjust it by "by"
-  const count = currentData!.refCount.get(entityKey) || 0;
+  const count = getRefCount(entityKey);
   const newCount = count + by > 0 ? count + by : 0;
   currentData!.refCount.set(entityKey, newCount);
   // Add it to the garbage collection batch if it needs to be deleted or remove it
@@ -406,12 +417,20 @@ export const gc = () => {
 
     // Check first whether the entity has any references,
     // if so, we skip it from the GC run
-    const rc = currentData!.refCount.get(entityKey) || 0;
+    const rc = getRefCount(entityKey);
     if (rc > 0) continue;
 
+    const record = currentData!.records.base.get(entityKey);
     // Delete the reference count, and delete the entity from the GC batch
     currentData!.refCount.delete(entityKey);
     currentData!.records.base.delete(entityKey);
+
+    const typename = (record && record.__typename) as string | undefined;
+    if (typename) {
+      const type = currentData!.types.get(typename);
+      if (type) type.delete(entityKey);
+    }
+
     const linkNode = currentData!.links.base.get(entityKey);
     if (linkNode) {
       currentData!.links.base.delete(entityKey);
@@ -439,7 +458,9 @@ export const readRecord = (
   entityKey: string,
   fieldKey: string
 ): EntityField => {
-  updateDependencies(entityKey, fieldKey);
+  if (currentOperation === 'read') {
+    updateDependencies(entityKey, fieldKey);
+  }
   return getNode(currentData!.records, entityKey, fieldKey);
 };
 
@@ -448,8 +469,44 @@ export const readLink = (
   entityKey: string,
   fieldKey: string
 ): Link | undefined => {
-  updateDependencies(entityKey, fieldKey);
+  if (currentOperation === 'read') {
+    updateDependencies(entityKey, fieldKey);
+  }
   return getNode(currentData!.links, entityKey, fieldKey);
+};
+
+export const getEntitiesForType = (typename: string): Set<string> =>
+  currentData!.types.get(typename) || DEFAULT_EMPTY_SET;
+
+export const writeType = (typename: string, entityKey: string) => {
+  const existingTypes = currentData!.types.get(typename);
+  if (!existingTypes) {
+    const typeSet = new Set<string>();
+    typeSet.add(entityKey);
+    currentData!.types.set(typename, typeSet);
+  } else {
+    existingTypes.add(entityKey);
+  }
+};
+
+export const getConcreteTypes = (typename: string): Set<string> =>
+  currentData!.abstractToConcreteMap.get(typename) || DEFAULT_EMPTY_SET;
+
+export const isSeenConcreteType = (typename: string): boolean =>
+  currentData!.types.has(typename);
+
+export const writeConcreteType = (
+  abstractType: string,
+  concreteType: string
+) => {
+  const existingTypes = currentData!.abstractToConcreteMap.get(abstractType);
+  if (!existingTypes) {
+    const typeSet = new Set<string>();
+    typeSet.add(concreteType);
+    currentData!.abstractToConcreteMap.set(abstractType, typeSet);
+  } else {
+    existingTypes.add(concreteType);
+  }
 };
 
 /** Writes an entity's field (a "record") to data */
@@ -458,8 +515,12 @@ export const writeRecord = (
   fieldKey: string,
   value?: EntityField
 ) => {
-  updateDependencies(entityKey, fieldKey);
-  updatePersist(entityKey, fieldKey);
+  const existing = getNode(currentData!.records, entityKey, fieldKey);
+  if (!isEqualLinkOrScalar(existing, value)) {
+    updateDependencies(entityKey, fieldKey);
+    updatePersist(entityKey, fieldKey);
+  }
+
   setNode(currentData!.records, entityKey, fieldKey, value);
 };
 
@@ -483,9 +544,12 @@ export const writeLink = (
     updateRCForLink(entityLinks && entityLinks[fieldKey], -1);
     updateRCForLink(link, 1);
   }
-  // Update persistence batch and dependencies
-  updateDependencies(entityKey, fieldKey);
-  updatePersist(entityKey, fieldKey);
+  const existing = getNode(currentData!.links, entityKey, fieldKey);
+  if (!isEqualLinkOrScalar(existing, link)) {
+    updateDependencies(entityKey, fieldKey);
+    updatePersist(entityKey, fieldKey);
+  }
+
   // Update the link
   setNode(currentData!.links, entityKey, fieldKey, link);
 };
@@ -527,6 +591,11 @@ export const reserveLayer = (
   data.optimisticOrder.splice(index, 0, layerKey);
   data.commutativeKeys.add(layerKey);
 };
+
+/** Checks whether a given layer exists */
+export const hasLayer = (data: InMemoryData, layerKey: number) =>
+  data.commutativeKeys.has(layerKey) ||
+  data.optimisticOrder.indexOf(layerKey) > -1;
 
 /** Creates an optimistic layer of links and records */
 const createLayer = (data: InMemoryData, layerKey: number) => {
@@ -574,8 +643,9 @@ const squashLayer = (layerKey: number) => {
     for (const entry of links.entries()) {
       const entityKey = entry[0];
       const keyMap = entry[1];
-      for (const fieldKey in keyMap)
+      for (const fieldKey in keyMap) {
         writeLink(entityKey, fieldKey, keyMap[fieldKey]);
+      }
     }
   }
 
@@ -584,8 +654,9 @@ const squashLayer = (layerKey: number) => {
     for (const entry of records.entries()) {
       const entityKey = entry[0];
       const keyMap = entry[1];
-      for (const fieldKey in keyMap)
+      for (const fieldKey in keyMap) {
         writeRecord(entityKey, fieldKey, keyMap[fieldKey]);
+      }
     }
   }
 
@@ -655,3 +726,17 @@ export const hydrateData = (
   data.hydrating = false;
   clearDataState();
 };
+
+function isEqualLinkOrScalar(
+  a: Link | EntityField | undefined,
+  b: Link | EntityField | undefined
+) {
+  if (typeof a !== typeof b) return false;
+  if (a !== b) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return !a.some((el, index) => el !== b[index]);
+  }
+
+  return true;
+}

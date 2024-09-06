@@ -1,5 +1,101 @@
 # @urql/exchange-graphcache
 
+## 7.1.2
+
+### Patch Changes
+
+- Disregard write-only operation when fragment-matching with schema awareness
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3621](https://github.com/urql-graphql/urql/pull/3621))
+
+## 7.1.1
+
+### Patch Changes
+
+- ⚠️ Fix where we would incorrectly match all fragment concrete types because they belong to the abstract type
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3603](https://github.com/urql-graphql/urql/pull/3603))
+
+## 7.1.0
+
+### Minor Changes
+
+- Mark `@urql/core` as a peer dependency as well as a regular dependency
+  Submitted by [@kitten](https://github.com/kitten) (See [#3579](https://github.com/urql-graphql/urql/pull/3579))
+
+## 7.0.2
+
+### Patch Changes
+
+- Only record dependencies that are changing data, this will reduce the amount of operations we re-invoke due to network-only/cache-and-network queries and mutations
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3564](https://github.com/urql-graphql/urql/pull/3564))
+
+## 7.0.1
+
+### Patch Changes
+
+- When invoking the automatic creation updater ignore the entity we are currently on in the mutation
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3560](https://github.com/urql-graphql/urql/pull/3560))
+
+## 7.0.0
+
+### Major Changes
+
+- Add a default updater for mutation fields who are lacking an updater and where the returned entity is not present in the cache
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3518](https://github.com/urql-graphql/urql/pull/3518))
+- Remove deprecated `resolveFieldByKey`, use `cache.resolve` instead
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3520](https://github.com/urql-graphql/urql/pull/3520))
+
+### Minor Changes
+
+- Track abstract types being written so that we have a more reliable way of matching abstract fragments
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3548](https://github.com/urql-graphql/urql/pull/3548))
+
+### Patch Changes
+
+- ⚠️ Fix `invalidate` not applying when using a string to invalidate an entity
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3545](https://github.com/urql-graphql/urql/pull/3545))
+- Upgrade `@0no-co/graphql.web` to `1.0.5`
+  Submitted by [@kitten](https://github.com/kitten) (See [#3553](https://github.com/urql-graphql/urql/pull/3553))
+- Updated dependencies (See [#3520](https://github.com/urql-graphql/urql/pull/3520), [#3553](https://github.com/urql-graphql/urql/pull/3553), and [#3520](https://github.com/urql-graphql/urql/pull/3520))
+  - @urql/core@5.0.0
+
+## 6.5.0
+
+### Minor Changes
+
+- Allow `@_optional` and `@_required` to be placed on fragment definitions and inline fragments
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3502](https://github.com/urql-graphql/urql/pull/3502))
+- Track list of entity keys for a given type name. This enables enumerating and invalidating all entities of a given type within the normalized cache
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3501](https://github.com/urql-graphql/urql/pull/3501))
+
+### Patch Changes
+
+- Prevent `@defer` from being applied in child field selections. Previously, a child field (i.e. a nested field) under a `@defer`-ed fragment would also become optional, which was based on a prior version of the DeferStream spec which didn't require deferred fields to be delivered as a group
+  Submitted by [@kitten](https://github.com/kitten) (See [#3517](https://github.com/urql-graphql/urql/pull/3517))
+- ⚠️ Fix `store.resolve()` returning the exact link array that’s used by the cache. This can lead to subtle bugs when a user mutates the result returned by `cache.resolve()`, since this directly mutates what’s in the cache at that layer
+  Submitted by [@kitten](https://github.com/kitten) (See [#3516](https://github.com/urql-graphql/urql/pull/3516))
+- Updated dependencies (See [#3514](https://github.com/urql-graphql/urql/pull/3514), [#3505](https://github.com/urql-graphql/urql/pull/3505), [#3499](https://github.com/urql-graphql/urql/pull/3499), and [#3515](https://github.com/urql-graphql/urql/pull/3515))
+  - @urql/core@4.3.0
+
+## 6.4.1
+
+### Patch Changes
+
+- Set `stale: true` on cache results, even if a reexecution has been blocked by the loop protection, if the operation is already pending and in-flight
+  Submitted by [@kitten](https://github.com/kitten) (See [#3493](https://github.com/urql-graphql/urql/pull/3493))
+- ⚠️ Fix `@defer` state leaking into following operations
+  Submitted by [@kitten](https://github.com/kitten) (See [#3497](https://github.com/urql-graphql/urql/pull/3497))
+
+## 6.4.0
+
+### Minor Changes
+
+- Allow the user to debug cache-misses by means of the new `logger` interface on the `cacheExchange`. A field miss will dispatch a `debug` log when it's not marked with `@_optional` or when it's non-nullable in the `schema`
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3446](https://github.com/urql-graphql/urql/pull/3446))
+- Add `onCacheHydrated` as an option for the `StorageAdapter`
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3428](https://github.com/urql-graphql/urql/pull/3428))
+- Add optional `logger` to the options, this allows you to filter out warnings or disable them all together
+  Submitted by [@JoviDeCroock](https://github.com/JoviDeCroock) (See [#3444](https://github.com/urql-graphql/urql/pull/3444))
+
 ## 6.3.3
 
 ### Patch Changes

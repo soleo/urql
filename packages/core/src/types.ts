@@ -9,6 +9,11 @@ import type { Subscription, Source } from 'wonka';
 import type { Client } from './client';
 import type { CombinedError } from './utils/error';
 
+/** A GraphQL persisted document will contain `documentId` that replaces its definitions */
+export interface PersistedDocument extends DocumentNode {
+  documentId?: string;
+}
+
 /** A GraphQL `DocumentNode` with attached generics for its result data and variables.
  *
  * @remarks
@@ -223,6 +228,7 @@ export interface ExecutionResult {
    * @see {@link https://github.com/graphql/graphql-wg/blob/main/rfcs/DeferStream.md#payload-format} for the DeferStream spec
    */
   hasNext?: boolean;
+  payload?: Omit<ExecutionResult, 'payload'>;
 }
 
 /** A source of {@link OperationResult | OperationResults}, convertable to a promise, subscribable, or Wonka Source.
@@ -340,7 +346,7 @@ export interface GraphQLRequest<
    * In `urql`, we expect a document to only contain a single operation that is executed rather than
    * multiple ones by convention.
    */
-  query: DocumentNode | TypedDocumentNode<Data, Variables>;
+  query: DocumentNode | PersistedDocument | TypedDocumentNode<Data, Variables>;
   /** Variables used to execute the `query` document.
    *
    * @remarks
